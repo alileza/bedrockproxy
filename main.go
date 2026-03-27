@@ -71,7 +71,7 @@ func run(configPath string) error {
 		return fmt.Errorf("create proxy: %w", err)
 	}
 
-	router := api.NewRouter(pool, p, events)
+	router := api.NewRouter(pool, p, resolver, events)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

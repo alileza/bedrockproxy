@@ -7,18 +7,20 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/proxy"
 )
 
 type Router struct {
-	pool  *pgxpool.Pool
-	proxy *proxy.Proxy
-	mux   *http.ServeMux
-	events *EventBus
+	pool     *pgxpool.Pool
+	proxy    *proxy.Proxy
+	resolver *auth.Resolver
+	mux      *http.ServeMux
+	events   *EventBus
 }
 
-func NewRouter(pool *pgxpool.Pool, proxy *proxy.Proxy, events *EventBus) *Router {
-	r := &Router{pool: pool, proxy: proxy, mux: http.NewServeMux(), events: events}
+func NewRouter(pool *pgxpool.Pool, proxy *proxy.Proxy, resolver *auth.Resolver, events *EventBus) *Router {
+	r := &Router{pool: pool, proxy: proxy, resolver: resolver, mux: http.NewServeMux(), events: events}
 	r.routes()
 	return r
 }
@@ -31,6 +33,9 @@ func (r *Router) routes() {
 	// Bedrock proxy endpoints (clients call these)
 	r.mux.HandleFunc("POST /model/{modelId}/converse", r.proxy.HandleConverse)
 	r.mux.HandleFunc("POST /model/{modelId}/invoke", r.proxy.HandleInvokeModel)
+
+	// Caller self-registration — caller hits this to register their ARN
+	r.mux.HandleFunc("POST /api/register-caller", r.handleRegisterCaller)
 
 	// Dashboard API endpoints
 	r.mux.HandleFunc("GET /api/ws", r.events.HandleWS)
@@ -213,6 +218,30 @@ func (r *Router) handleModels(w http.ResponseWriter, req *http.Request) {
 		models = []model{}
 	}
 	writeJSON(w, models)
+}
+
+func (r *Router) handleRegisterCaller(w http.ResponseWriter, req *http.Request) {
+	caller, err := auth.ParseSigV4(req)
+	if err != nil {
+		http.Error(w, `{"message":"missing SigV4 Authorization header"}`, http.StatusUnauthorized)
+		return
+	}
+
+	var body struct {
+		ARN       string `json:"arn"`
+		AccountID string `json:"account_id"`
+		UserID    string `json:"user_id"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.ARN == "" {
+		http.Error(w, `{"message":"body must contain 'arn'"}`, http.StatusBadRequest)
+		return
+	}
+
+	if r.resolver != nil {
+		r.resolver.UpdateRoleARN(req.Context(), caller.AccessKeyID, body.ARN)
+	}
+
+	writeJSON(w, map[string]string{"status": "registered", "access_key_id": caller.AccessKeyID, "arn": body.ARN})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
