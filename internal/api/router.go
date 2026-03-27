@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/traderepublic/bedrockproxy/internal/proxy"
+	"bedrockproxy/internal/proxy"
 )
 
 type Router struct {

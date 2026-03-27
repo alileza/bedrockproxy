@@ -1,4 +1,4 @@
-module github.com/traderepublic/bedrockproxy
+module bedrockproxy
 
 go 1.26.1
 

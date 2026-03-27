@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/traderepublic/bedrockproxy/internal/config"
+	"bedrockproxy/internal/config"
 )
 
 // Request represents a single proxied Bedrock call.

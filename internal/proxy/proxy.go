@@ -14,8 +14,8 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
-	"github.com/traderepublic/bedrockproxy/internal/auth"
-	"github.com/traderepublic/bedrockproxy/internal/usage"
+	"bedrockproxy/internal/auth"
+	"bedrockproxy/internal/usage"
 )
 
 // Proxy handles forwarding requests to AWS Bedrock.

@@ -13,11 +13,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/traderepublic/bedrockproxy/internal/api"
-	"github.com/traderepublic/bedrockproxy/internal/config"
-	"github.com/traderepublic/bedrockproxy/internal/database"
-	"github.com/traderepublic/bedrockproxy/internal/proxy"
-	"github.com/traderepublic/bedrockproxy/internal/usage"
+	"bedrockproxy/internal/api"
+	"bedrockproxy/internal/config"
+	"bedrockproxy/internal/database"
+	"bedrockproxy/internal/proxy"
+	"bedrockproxy/internal/usage"
 )
 
 func main() {
