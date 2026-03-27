@@ -111,9 +111,7 @@ func (p *Proxy) HandleConverse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if p.resolver != nil {
-		p.resolver.Resolve(r.Context(), caller.AccessKeyID)
-	}
+	p.resolveCaller(r, caller)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -184,9 +182,7 @@ func (p *Proxy) HandleInvokeModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if p.resolver != nil {
-		p.resolver.Resolve(r.Context(), caller.AccessKeyID)
-	}
+	p.resolveCaller(r, caller)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -247,4 +243,21 @@ func extractTokenCounts(body []byte) (inputTokens, outputTokens int) {
 		return resp.Usage.InputTokens, resp.Usage.OutputTokens
 	}
 	return 0, 0
+}
+
+// resolveCaller triggers identity resolution for the caller.
+// Checks X-Bedrock-Caller-ARN header first (for testing/manual override),
+// then falls back to STS resolution.
+func (p *Proxy) resolveCaller(r *http.Request, caller *auth.CallerIdentity) {
+	if p.resolver == nil {
+		return
+	}
+
+	// Allow explicit ARN override via header (useful for testing and internal routing)
+	if arn := r.Header.Get("X-Bedrock-Caller-ARN"); arn != "" {
+		p.resolver.UpdateRoleARN(r.Context(), caller.AccessKeyID, arn)
+		return
+	}
+
+	p.resolver.Resolve(r.Context(), caller.AccessKeyID)
 }
