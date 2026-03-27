@@ -45,11 +45,24 @@ export interface Model {
   created_at: string;
 }
 
+export type TimeRange = {
+  label: string;
+  minutes: number;
+};
+
+export const TIME_RANGES: TimeRange[] = [
+  { label: "15m", minutes: 15 },
+  { label: "1h", minutes: 60 },
+  { label: "24h", minutes: 1440 },
+  { label: "3d", minutes: 4320 },
+  { label: "7d", minutes: 10080 },
+];
+
 export const api = {
-  getUsageSummary: (days = 30) =>
-    fetchJSON<UsageSummary>(`/usage/summary?days=${days}`),
-  getCallers: (days = 30) =>
-    fetchJSON<Caller[]>(`/usage/callers?days=${days}`),
+  getUsageSummary: (minutes = 43200) =>
+    fetchJSON<UsageSummary>(`/usage/summary?minutes=${minutes}`),
+  getCallers: (minutes = 43200) =>
+    fetchJSON<Caller[]>(`/usage/callers?minutes=${minutes}`),
   getActivity: (limit = 50) =>
     fetchJSON<ActivityEntry[]>(`/usage/activity?limit=${limit}`),
   getModels: () => fetchJSON<Model[]>("/models"),

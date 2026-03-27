@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
+import { useSSEStatus } from "@/hooks/useSSE";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" },
@@ -9,6 +10,7 @@ const navItems = [
 
 export function Sidebar() {
   const [expanded, setExpanded] = useState(false);
+  const sseConnected = useSSEStatus();
 
   return (
     <nav
@@ -21,13 +23,28 @@ export function Sidebar() {
       onMouseLeave={() => setExpanded(false)}
     >
       <div className="h-16 flex items-center px-4 border-b border-border-primary">
-        <div className="w-8 h-8 rounded-[8px] bg-content-primary flex items-center justify-center flex-shrink-0">
+        <div className="relative w-8 h-8 rounded-[8px] bg-content-primary flex items-center justify-center flex-shrink-0">
           <span className="text-white text-sm font-[680]">B</span>
+          <span
+            className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface-primary transition-colors duration-300 ${
+              sseConnected ? "bg-status-success" : "bg-status-error"
+            }`}
+            title={sseConnected ? "Live" : "Disconnected"}
+          />
         </div>
         {expanded && (
-          <span className="ml-3 text-sm font-[680] whitespace-nowrap overflow-hidden">
-            Bedrock Proxy
-          </span>
+          <div className="ml-3 overflow-hidden">
+            <span className="text-sm font-[680] whitespace-nowrap block">
+              Bedrock Proxy
+            </span>
+            <span
+              className={`text-[10px] whitespace-nowrap ${
+                sseConnected ? "text-status-success" : "text-status-error"
+              }`}
+            >
+              {sseConnected ? "Live" : "Disconnected"}
+            </span>
+          </div>
         )}
       </div>
 

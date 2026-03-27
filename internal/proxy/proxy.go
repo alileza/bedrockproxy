@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/usage"
@@ -20,12 +21,13 @@ import (
 
 // Proxy handles forwarding requests to AWS Bedrock.
 type Proxy struct {
-	client  *bedrockruntime.Client
-	tracker *usage.Tracker
-	region  string
+	client   *bedrockruntime.Client
+	tracker  *usage.Tracker
+	resolver *auth.Resolver
+	region   string
 }
 
-func New(ctx context.Context, region string, tracker *usage.Tracker) (*Proxy, error) {
+func New(ctx context.Context, region string, tracker *usage.Tracker, resolver *auth.Resolver) (*Proxy, error) {
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
@@ -34,10 +36,63 @@ func New(ctx context.Context, region string, tracker *usage.Tracker) (*Proxy, er
 	client := bedrockruntime.NewFromConfig(cfg)
 
 	return &Proxy{
-		client:  client,
-		tracker: tracker,
-		region:  region,
+		client:   client,
+		tracker:  tracker,
+		resolver: resolver,
+		region:   region,
 	}, nil
+}
+
+// converseRequest is the JSON body format for the Converse API.
+type converseRequest struct {
+	Messages []struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Text string `json:"text,omitempty"`
+		} `json:"content"`
+	} `json:"messages"`
+	System []struct {
+		Text string `json:"text,omitempty"`
+	} `json:"system,omitempty"`
+	InferenceConfig *struct {
+		MaxTokens   *int32   `json:"maxTokens,omitempty"`
+		Temperature *float32 `json:"temperature,omitempty"`
+		TopP        *float32 `json:"topP,omitempty"`
+		StopSequences []string `json:"stopSequences,omitempty"`
+	} `json:"inferenceConfig,omitempty"`
+}
+
+func (cr *converseRequest) toSDK(modelID string) *bedrockruntime.ConverseInput {
+	input := &bedrockruntime.ConverseInput{
+		ModelId: aws.String(modelID),
+	}
+
+	for _, msg := range cr.Messages {
+		m := types.Message{Role: types.ConversationRole(msg.Role)}
+		for _, c := range msg.Content {
+			if c.Text != "" {
+				m.Content = append(m.Content, &types.ContentBlockMemberText{Value: c.Text})
+			}
+		}
+		input.Messages = append(input.Messages, m)
+	}
+
+	for _, s := range cr.System {
+		if s.Text != "" {
+			input.System = append(input.System, &types.SystemContentBlockMemberText{Value: s.Text})
+		}
+	}
+
+	if cr.InferenceConfig != nil {
+		input.InferenceConfig = &types.InferenceConfiguration{
+			MaxTokens:     cr.InferenceConfig.MaxTokens,
+			Temperature:   cr.InferenceConfig.Temperature,
+			TopP:          cr.InferenceConfig.TopP,
+			StopSequences: cr.InferenceConfig.StopSequences,
+		}
+	}
+
+	return input
 }
 
 // HandleConverse handles the Bedrock Converse API.
@@ -56,6 +111,10 @@ func (p *Proxy) HandleConverse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if p.resolver != nil {
+		p.resolver.Resolve(r.Context(), caller.AccessKeyID)
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, `{"message":"failed to read request body"}`, http.StatusBadRequest)
@@ -63,14 +122,14 @@ func (p *Proxy) HandleConverse(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	start := time.Now()
-
-	input := &bedrockruntime.ConverseInput{}
-	if err := json.Unmarshal(body, input); err != nil {
-		http.Error(w, `{"message":"invalid request body"}`, http.StatusBadRequest)
+	var req converseRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, fmt.Sprintf(`{"message":"invalid request body: %s"}`, err), http.StatusBadRequest)
 		return
 	}
-	input.ModelId = aws.String(modelID)
+
+	start := time.Now()
+	input := req.toSDK(modelID)
 
 	output, err := p.client.Converse(r.Context(), input)
 	latency := time.Since(start)
@@ -81,8 +140,6 @@ func (p *Proxy) HandleConverse(w http.ResponseWriter, r *http.Request) {
 			AccessKeyID:  caller.AccessKeyID,
 			ModelID:      modelID,
 			Operation:    "Converse",
-			InputTokens:  0,
-			OutputTokens: 0,
 			LatencyMs:    int(latency.Milliseconds()),
 			StatusCode:   500,
 			ErrorMessage: err.Error(),
@@ -127,6 +184,10 @@ func (p *Proxy) HandleInvokeModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if p.resolver != nil {
+		p.resolver.Resolve(r.Context(), caller.AccessKeyID)
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, `{"message":"failed to read request body"}`, http.StatusBadRequest)
@@ -158,7 +219,6 @@ func (p *Proxy) HandleInvokeModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to extract token counts from the response body
 	inputTokens, outputTokens := extractTokenCounts(output.Body)
 
 	p.tracker.Record(r.Context(), usage.Request{

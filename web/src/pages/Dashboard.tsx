@@ -1,40 +1,47 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { api, TIME_RANGES, type TimeRange } from "@/api/client";
 import { StatCard } from "@/components/StatCard";
 import { Table } from "@/components/Table";
+import { TimeRangePicker } from "@/components/TimeRangePicker";
 import { formatCost, formatTokens, formatNumber, shortenArn } from "@/lib/format";
 import type { Caller } from "@/api/client";
 
 export function Dashboard() {
+  const [range, setRange] = useState<TimeRange>(TIME_RANGES[2]); // default 24h
+
   const { data: summary } = useQuery({
-    queryKey: ["usage-summary"],
-    queryFn: () => api.getUsageSummary(30),
+    queryKey: ["usage-summary", range.minutes],
+    queryFn: () => api.getUsageSummary(range.minutes),
   });
 
   const { data: callers } = useQuery({
-    queryKey: ["callers"],
-    queryFn: () => api.getCallers(30),
+    queryKey: ["callers", range.minutes],
+    queryFn: () => api.getCallers(range.minutes),
   });
 
   return (
     <div>
-      <h1 className="text-[28px] font-[680] text-content-primary mb-8">
-        Dashboard
-      </h1>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-[28px] font-[680] text-content-primary">
+          Dashboard
+        </h1>
+        <TimeRangePicker value={range} onChange={setRange} />
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard
-          label="Total Requests"
+          label="Requests"
           value={summary ? formatNumber(summary.total_requests) : "-"}
-          subtitle="Last 30 days"
+          subtitle={`Last ${range.label}`}
         />
         <StatCard
-          label="Total Cost"
+          label="Cost"
           value={summary ? formatCost(summary.total_cost_usd) : "-"}
-          subtitle="Last 30 days"
+          subtitle={`Last ${range.label}`}
         />
         <StatCard
-          label="Total Tokens"
+          label="Tokens"
           value={
             summary
               ? formatTokens(
@@ -45,14 +52,14 @@ export function Dashboard() {
           subtitle="Input + Output"
         />
         <StatCard
-          label="Unique Callers"
+          label="Callers"
           value={summary ? formatNumber(summary.unique_callers) : "-"}
           subtitle="Distinct IAM roles"
         />
       </div>
 
       <h2 className="text-lg font-[680] text-content-primary mb-4">
-        Top Callers
+        Usage per Caller
       </h2>
       <Table<Caller>
         keyFn={(c) => c.access_key_id}

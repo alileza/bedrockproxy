@@ -14,10 +14,11 @@ type Router struct {
 	pool  *pgxpool.Pool
 	proxy *proxy.Proxy
 	mux   *http.ServeMux
+	events *EventBus
 }
 
-func NewRouter(pool *pgxpool.Pool, proxy *proxy.Proxy) *Router {
-	r := &Router{pool: pool, proxy: proxy, mux: http.NewServeMux()}
+func NewRouter(pool *pgxpool.Pool, proxy *proxy.Proxy, events *EventBus) *Router {
+	r := &Router{pool: pool, proxy: proxy, mux: http.NewServeMux(), events: events}
 	r.routes()
 	return r
 }
@@ -32,6 +33,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /model/{modelId}/invoke", r.proxy.HandleInvokeModel)
 
 	// Dashboard API endpoints
+	r.mux.HandleFunc("GET /api/events", r.events.HandleSSE)
 	r.mux.HandleFunc("GET /api/health", r.handleHealth)
 	r.mux.HandleFunc("GET /api/usage/summary", r.handleUsageSummary)
 	r.mux.HandleFunc("GET /api/usage/callers", r.handleCallers)
@@ -44,18 +46,18 @@ func (r *Router) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (r *Router) handleUsageSummary(w http.ResponseWriter, req *http.Request) {
-	days := queryInt(req, "days", 30)
+	minutes := queryInt(req, "minutes", 43200) // default 30 days
 
 	rows, err := r.pool.Query(req.Context(), `
 		SELECT
-			COALESCE(SUM(request_count), 0)  AS total_requests,
-			COALESCE(SUM(input_tokens), 0)   AS total_input_tokens,
-			COALESCE(SUM(output_tokens), 0)  AS total_output_tokens,
-			COALESCE(SUM(cost_usd), 0)       AS total_cost_usd,
-			COUNT(DISTINCT caller_id)         AS unique_callers
-		FROM daily_usage
-		WHERE day >= CURRENT_DATE - $1 * INTERVAL '1 day'
-	`, days)
+			COUNT(*)                          AS total_requests,
+			COALESCE(SUM(input_tokens), 0)    AS total_input_tokens,
+			COALESCE(SUM(output_tokens), 0)   AS total_output_tokens,
+			COALESCE(SUM(cost_usd), 0)        AS total_cost_usd,
+			COUNT(DISTINCT caller_id)          AS unique_callers
+		FROM requests
+		WHERE created_at >= NOW() - $1 * INTERVAL '1 minute'
+	`, minutes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -77,23 +79,23 @@ func (r *Router) handleUsageSummary(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleCallers(w http.ResponseWriter, req *http.Request) {
-	days := queryInt(req, "days", 30)
+	minutes := queryInt(req, "minutes", 43200)
 
 	rows, err := r.pool.Query(req.Context(), `
 		SELECT
 			c.access_key_id,
 			COALESCE(c.role_arn, c.access_key_id) AS display_name,
-			SUM(d.request_count)  AS total_requests,
-			SUM(d.input_tokens)   AS total_input_tokens,
-			SUM(d.output_tokens)  AS total_output_tokens,
-			SUM(d.cost_usd)       AS total_cost_usd
-		FROM daily_usage d
-		JOIN callers c ON c.id = d.caller_id
-		WHERE d.day >= CURRENT_DATE - $1 * INTERVAL '1 day'
+			COUNT(*)              AS total_requests,
+			SUM(r.input_tokens)   AS total_input_tokens,
+			SUM(r.output_tokens)  AS total_output_tokens,
+			SUM(r.cost_usd)       AS total_cost_usd
+		FROM requests r
+		JOIN callers c ON c.id = r.caller_id
+		WHERE r.created_at >= NOW() - $1 * INTERVAL '1 minute'
 		GROUP BY c.access_key_id, c.role_arn
 		ORDER BY total_cost_usd DESC
 		LIMIT 100
-	`, days)
+	`, minutes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

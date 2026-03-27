@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"bedrockproxy/internal/api"
+	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/config"
 	"bedrockproxy/internal/database"
 	"bedrockproxy/internal/proxy"
@@ -55,14 +56,22 @@ func run(configPath string) error {
 		return fmt.Errorf("seed models: %w", err)
 	}
 
-	tracker := usage.NewTracker(pool, cfg.Models)
+	events := api.NewEventBus()
 
-	p, err := proxy.New(ctx, cfg.AWS.Region, tracker)
+	tracker := usage.NewTracker(pool, cfg.Models)
+	tracker.Notify = events.NotifyFunc()
+
+	resolver, err := auth.NewResolver(ctx, cfg.AWS.Region, pool)
+	if err != nil {
+		return fmt.Errorf("create resolver: %w", err)
+	}
+
+	p, err := proxy.New(ctx, cfg.AWS.Region, tracker, resolver)
 	if err != nil {
 		return fmt.Errorf("create proxy: %w", err)
 	}
 
-	router := api.NewRouter(pool, p)
+	router := api.NewRouter(pool, p, events)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

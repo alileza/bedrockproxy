@@ -34,10 +34,12 @@ export function timeAgo(dateStr: string): string {
 }
 
 export function shortenArn(arn: string): string {
-  // arn:aws:sts::123456:assumed-role/MyRole/session -> MyRole
-  const match = arn.match(/assumed-role\/([^/]+)/);
+  // arn:aws:sts::123456:assumed-role/MyRole/session -> MyRole/session
+  const match = arn.match(/assumed-role\/(.+)/);
   if (match) return match[1];
-  // ASIA... access key
-  if (arn.startsWith("ASIA") || arn.startsWith("AKIA")) return arn.slice(0, 12) + "...";
+  // arn:aws:iam::123456:role/MyRole -> MyRole
+  const roleMatch = arn.match(/:role\/(.+)/);
+  if (roleMatch) return roleMatch[1];
+  // raw access key — show full
   return arn;
 }

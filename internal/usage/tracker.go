@@ -27,6 +27,7 @@ type Tracker struct {
 	pool   *pgxpool.Pool
 	prices map[string]config.ModelConfig
 	mu     sync.RWMutex
+	Notify func()
 }
 
 func NewTracker(pool *pgxpool.Pool, models []config.ModelConfig) *Tracker {
@@ -37,8 +38,8 @@ func NewTracker(pool *pgxpool.Pool, models []config.ModelConfig) *Tracker {
 	return &Tracker{pool: pool, prices: prices}
 }
 
-func (t *Tracker) Record(ctx context.Context, req Request) {
-	go t.record(ctx, req)
+func (t *Tracker) Record(_ context.Context, req Request) {
+	go t.record(context.Background(), req)
 }
 
 func (t *Tracker) record(ctx context.Context, req Request) {
@@ -56,6 +57,10 @@ func (t *Tracker) record(ctx context.Context, req Request) {
 	`, callerID, req.ModelID, req.Operation, req.InputTokens, req.OutputTokens, costUSD, req.LatencyMs, req.StatusCode, nilIfEmpty(req.ErrorMessage))
 	if err != nil {
 		slog.Error("insert request failed", "error", err)
+		return
+	}
+	if t.Notify != nil {
+		t.Notify()
 	}
 }
 
