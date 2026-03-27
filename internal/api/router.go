@@ -33,7 +33,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /model/{modelId}/invoke", r.proxy.HandleInvokeModel)
 
 	// Dashboard API endpoints
-	r.mux.HandleFunc("GET /api/events", r.events.HandleSSE)
+	r.mux.HandleFunc("GET /api/ws", r.events.HandleWS)
 	r.mux.HandleFunc("GET /api/health", r.handleHealth)
 	r.mux.HandleFunc("GET /api/usage/summary", r.handleUsageSummary)
 	r.mux.HandleFunc("GET /api/usage/callers", r.handleCallers)

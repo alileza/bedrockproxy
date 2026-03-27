@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { useSSEStatus } from "@/hooks/useSSE";
+import { useWSStatus } from "@/hooks/useSSE";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" },
@@ -10,7 +10,7 @@ const navItems = [
 
 export function Sidebar() {
   const [expanded, setExpanded] = useState(false);
-  const sseConnected = useSSEStatus();
+  const sseConnected = useWSStatus();
 
   return (
     <nav

@@ -3,10 +3,10 @@ import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./pages/Dashboard";
 import { Activity } from "./pages/Activity";
 import { Models } from "./pages/Models";
-import { useSSE } from "./hooks/useSSE";
+import { useWS } from "./hooks/useSSE";
 
 export function App() {
-  useSSE();
+  useWS();
 
   return (
     <div className="flex min-h-screen">

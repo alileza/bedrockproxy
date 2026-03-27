@@ -6,7 +6,9 @@ const listeners = new Set<() => void>();
 
 function subscribe(cb: () => void) {
   listeners.add(cb);
-  return () => listeners.delete(cb);
+  return () => {
+    listeners.delete(cb);
+  };
 }
 
 function getSnapshot() {
@@ -20,44 +22,48 @@ function setConnected(value: boolean) {
   }
 }
 
-export function useSSEStatus() {
+export function useWSStatus() {
   return useSyncExternalStore(subscribe, getSnapshot);
 }
 
-export function useSSE() {
+export function useWS() {
   const queryClient = useQueryClient();
   const retryDelay = useRef(1000);
 
   useEffect(() => {
-    let es: EventSource | null = null;
+    let ws: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     function connect() {
-      es = new EventSource("/api/events");
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${proto}//${location.host}/api/ws`);
 
-      es.onopen = () => {
+      ws.onopen = () => {
         retryDelay.current = 1000;
         setConnected(true);
       };
 
-      es.onmessage = () => {
+      ws.onmessage = () => {
         queryClient.invalidateQueries();
       };
 
-      es.onerror = () => {
+      ws.onclose = () => {
         setConnected(false);
-        es?.close();
         timer = setTimeout(() => {
           retryDelay.current = Math.min(retryDelay.current * 2, 30000);
           connect();
         }, retryDelay.current);
+      };
+
+      ws.onerror = () => {
+        ws?.close();
       };
     }
 
     connect();
 
     return () => {
-      es?.close();
+      ws?.close();
       setConnected(false);
       if (timer) clearTimeout(timer);
     };
