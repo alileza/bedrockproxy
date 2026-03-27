@@ -1,0 +1,21 @@
+server:
+  port: 8080
+  base_url: "http://localhost:5173"
+
+database:
+  url: "postgres://bedrockproxy:bedrockproxy@localhost:5432/bedrockproxy?sslmode=disable"
+
+aws:
+  region: "eu-central-1"
+
+models:
+  - id: "anthropic.claude-sonnet-4-6"
+    name: "Claude Sonnet 4.6"
+    input_price_per_million: 3.0
+    output_price_per_million: 15.0
+    enabled: true
+  - id: "anthropic.claude-haiku-4-5-20251001-v1:0"
+    name: "Claude Haiku 4.5"
+    input_price_per_million: 0.8
+    output_price_per_million: 4.0
+    enabled: true

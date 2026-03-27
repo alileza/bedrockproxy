@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+@theme {
+  /* Trade Republic Design System */
+  --color-content-primary: #000000;
+  --color-content-secondary: #8c939c;
+  --color-content-tertiary: #c4cbd1;
+  --color-content-action: #0057ff;
+
+  --color-surface-primary: #ffffff;
+  --color-surface-secondary: rgba(0, 42, 97, 0.05);
+  --color-surface-elevated: #ffffff;
+
+  --color-border-primary: rgba(0, 0, 0, 0.08);
+  --color-border-focus: #0057ff;
+
+  --color-hover-primary: rgba(0, 0, 0, 0.04);
+
+  --color-status-success: #00db7f;
+  --color-status-warning: #ff6f06;
+  --color-status-error: #ff4034;
+
+  --color-grey-100: rgba(0, 0, 0, 0.05);
+  --color-grey-200: rgba(0, 0, 0, 0.08);
+  --color-grey-300: rgba(0, 0, 0, 0.12);
+  --color-grey-400: rgba(0, 0, 0, 0.2);
+  --color-grey-500: rgba(0, 0, 0, 0.35);
+  --color-grey-600: rgba(0, 0, 0, 0.5);
+  --color-grey-700: rgba(0, 0, 0, 0.65);
+  --color-grey-800: rgba(0, 0, 0, 0.8);
+  --color-grey-900: #000000;
+
+  --shadow-sm: 0 2px 12px 0 rgb(0 0 0 / 0.08);
+  --shadow-lg: 0 4px 24px 0 rgb(0 0 0 / 0.12);
+
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+
+  --font-sans: "TradeRepublicSans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--color-surface-secondary);
+  color: var(--color-content-primary);
+}
