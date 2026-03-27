@@ -84,7 +84,11 @@ func (r *Router) handleCallers(w http.ResponseWriter, req *http.Request) {
 	rows, err := r.pool.Query(req.Context(), `
 		SELECT
 			c.access_key_id,
-			COALESCE(c.role_arn, c.access_key_id) AS display_name,
+			COALESCE(
+				c.role_arn,
+				CASE WHEN c.account_id IS NOT NULL THEN 'arn:aws:iam::' || c.account_id || ':access-key/' || c.access_key_id
+				ELSE c.access_key_id END
+			) AS display_name,
 			COUNT(*)              AS total_requests,
 			SUM(r.input_tokens)   AS total_input_tokens,
 			SUM(r.output_tokens)  AS total_output_tokens,
@@ -92,7 +96,7 @@ func (r *Router) handleCallers(w http.ResponseWriter, req *http.Request) {
 		FROM requests r
 		JOIN callers c ON c.id = r.caller_id
 		WHERE r.created_at >= NOW() - $1 * INTERVAL '1 minute'
-		GROUP BY c.access_key_id, c.role_arn
+		GROUP BY c.access_key_id, c.role_arn, c.account_id
 		ORDER BY total_cost_usd DESC
 		LIMIT 100
 	`, minutes)
@@ -129,7 +133,11 @@ func (r *Router) handleActivity(w http.ResponseWriter, req *http.Request) {
 	rows, err := r.pool.Query(req.Context(), `
 		SELECT
 			r.id,
-			COALESCE(c.role_arn, c.access_key_id) AS caller,
+			COALESCE(
+				c.role_arn,
+				CASE WHEN c.account_id IS NOT NULL THEN 'arn:aws:iam::' || c.account_id || ':access-key/' || c.access_key_id
+				ELSE c.access_key_id END
+			) AS caller,
 			r.model_id,
 			r.operation,
 			r.input_tokens,

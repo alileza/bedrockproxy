@@ -8,9 +8,15 @@ import (
 
 // CallerIdentity represents the identity extracted from a SigV4 Authorization header.
 type CallerIdentity struct {
-	AccessKeyID string
-	Region      string
-	Service     string
+	AccessKeyID   string
+	Region        string
+	Service       string
+	SecurityToken string // X-Amz-Security-Token (present for STS temporary credentials)
+}
+
+// IsTemporary returns true if the credentials are STS temporary (IRSA, AssumeRole, etc.)
+func (c *CallerIdentity) IsTemporary() bool {
+	return strings.HasPrefix(c.AccessKeyID, "ASIA")
 }
 
 // ParseSigV4 extracts caller identity from the AWS SigV4 Authorization header.
@@ -47,8 +53,9 @@ func ParseSigV4(r *http.Request) (*CallerIdentity, error) {
 	}
 
 	return &CallerIdentity{
-		AccessKeyID: credParts[0],
-		Region:      credParts[2],
-		Service:     credParts[3],
+		AccessKeyID:   credParts[0],
+		Region:        credParts[2],
+		Service:       credParts[3],
+		SecurityToken: r.Header.Get("X-Amz-Security-Token"),
 	}, nil
 }

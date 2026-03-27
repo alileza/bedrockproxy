@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -80,7 +81,15 @@ func (t *Tracker) calculateCost(modelID string, inputTokens, outputTokens int) f
 
 	m, ok := t.prices[modelID]
 	if !ok {
-		return 0
+		// Try stripping region prefix: eu.anthropic.claude-... -> anthropic.claude-...
+		stripped := modelID
+		if idx := strings.Index(modelID, "."); idx != -1 && idx < 4 {
+			stripped = modelID[idx+1:]
+		}
+		m, ok = t.prices[stripped]
+		if !ok {
+			return 0
+		}
 	}
 	inputCost := float64(inputTokens) * m.InputPricePerMillion / 1_000_000
 	outputCost := float64(outputTokens) * m.OutputPricePerMillion / 1_000_000
