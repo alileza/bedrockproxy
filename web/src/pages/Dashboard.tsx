@@ -62,14 +62,23 @@ export function Dashboard() {
         Usage per Caller
       </h2>
       <Table<Caller>
-        keyFn={(c) => c.access_key_id}
+        keyFn={(c) => `${c.account_id}:${c.role}`}
         columns={[
           {
-            key: "caller",
-            label: "Caller",
+            key: "account",
+            label: "Account",
             render: (c) => (
-              <span className="font-[580]" title={c.display_name}>
-                {shortenArn(c.display_name)}
+              <span className="text-sm text-content-secondary font-mono">
+                {c.account_id}
+              </span>
+            ),
+          },
+          {
+            key: "role",
+            label: "Role",
+            render: (c) => (
+              <span className="font-[580]" title={c.role}>
+                {shortenArn(c.role)}
               </span>
             ),
           },

@@ -15,8 +15,8 @@ export interface UsageSummary {
 }
 
 export interface Caller {
-  access_key_id: string;
-  display_name: string;
+  account_id: string;
+  role: string;
   total_requests: number;
   total_input_tokens: number;
   total_output_tokens: number;
