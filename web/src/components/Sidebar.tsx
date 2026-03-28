@@ -25,12 +25,12 @@ export function Sidebar() {
       <div className="h-16 flex items-center px-4 border-b border-border-primary">
         <div className="relative w-8 h-8 flex-shrink-0">
           <svg viewBox="0 0 64 64" fill="none" className="w-8 h-8">
-            <path d="M32 4L56 18V46L32 60L8 46V18L32 4Z" stroke="#0057FF" strokeWidth="2.5"/>
-            <path d="M32 16L46 32L32 48L18 32L32 16Z" fill="#0057FF"/>
-            <line x1="32" y1="4" x2="32" y2="16" stroke="#0057FF" strokeWidth="2.5" strokeLinecap="round"/>
-            <line x1="32" y1="48" x2="32" y2="60" stroke="#0057FF" strokeWidth="2.5" strokeLinecap="round"/>
-            <line x1="8" y1="32" x2="18" y2="32" stroke="#0057FF" strokeWidth="2.5" strokeLinecap="round"/>
-            <line x1="46" y1="32" x2="56" y2="32" stroke="#0057FF" strokeWidth="2.5" strokeLinecap="round"/>
+            <path d="M32 4L56 18V46L32 60L8 46V18L32 4Z" stroke="#000" strokeWidth="4"/>
+            <path d="M32 16L46 32L32 48L18 32L32 16Z" fill="#000"/>
+            <line x1="32" y1="4" x2="32" y2="16" stroke="#000" strokeWidth="4" strokeLinecap="round"/>
+            <line x1="32" y1="48" x2="32" y2="60" stroke="#000" strokeWidth="4" strokeLinecap="round"/>
+            <line x1="8" y1="32" x2="18" y2="32" stroke="#000" strokeWidth="4" strokeLinecap="round"/>
+            <line x1="46" y1="32" x2="56" y2="32" stroke="#000" strokeWidth="4" strokeLinecap="round"/>
             <circle cx="32" cy="32" r="4" fill="white"/>
           </svg>
           <span
