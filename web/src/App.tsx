@@ -7,6 +7,7 @@ import { Table } from "./components/Table";
 import { StatusBadge } from "./components/StatusBadge";
 import { QuotaSection } from "./components/QuotaSection";
 import { useWS, useWSStatus } from "./hooks/useSSE";
+import { useTheme } from "./hooks/useTheme";
 import {
   formatCost,
   formatTokens,
@@ -20,6 +21,7 @@ import type { Caller, ActivityEntry } from "./api/client";
 export function App() {
   useWS();
   const connected = useWSStatus();
+  const { theme, toggle: toggleTheme } = useTheme();
   const [range, setRange] = useState<TimeRange>(TIME_RANGES[2]);
 
   const { data: summary } = useQuery({
@@ -44,13 +46,13 @@ export function App() {
         <div className="flex items-center gap-3">
           <div className="relative">
             <svg viewBox="0 0 64 64" fill="none" className="w-7 h-7">
-              <path d="M32 4L56 18V46L32 60L8 46V18L32 4Z" stroke="#000" strokeWidth="4" />
-              <path d="M32 16L46 32L32 48L18 32L32 16Z" fill="#000" />
-              <line x1="32" y1="4" x2="32" y2="16" stroke="#000" strokeWidth="4" strokeLinecap="round" />
-              <line x1="32" y1="48" x2="32" y2="60" stroke="#000" strokeWidth="4" strokeLinecap="round" />
-              <line x1="8" y1="32" x2="18" y2="32" stroke="#000" strokeWidth="4" strokeLinecap="round" />
-              <line x1="46" y1="32" x2="56" y2="32" stroke="#000" strokeWidth="4" strokeLinecap="round" />
-              <circle cx="32" cy="32" r="4" fill="white" />
+              <path d="M32 4L56 18V46L32 60L8 46V18L32 4Z" stroke="currentColor" strokeWidth="4" />
+              <path d="M32 16L46 32L32 48L18 32L32 16Z" fill="currentColor" />
+              <line x1="32" y1="4" x2="32" y2="16" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+              <line x1="32" y1="48" x2="32" y2="60" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+              <line x1="8" y1="32" x2="18" y2="32" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+              <line x1="46" y1="32" x2="56" y2="32" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+              <circle cx="32" cy="32" r="4" fill="var(--color-surface-primary)" />
             </svg>
             <span
               className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border-[1.5px] border-surface-primary transition-colors duration-300 ${
@@ -62,7 +64,24 @@ export function App() {
             Bedrock Proxy
           </span>
         </div>
-        <TimeRangePicker value={range} onChange={setRange} />
+        <div className="flex items-center gap-3">
+          <TimeRangePicker value={range} onChange={setRange} />
+          <button
+            onClick={toggleTheme}
+            className="w-8 h-8 flex items-center justify-center rounded-[8px] hover:bg-hover-primary transition-colors text-content-secondary"
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
+          >
+            {theme === "dark" ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+              </svg>
+            )}
+          </button>
+        </div>
       </header>
 
       <main className="max-w-[1440px] mx-auto px-8 pb-8">
