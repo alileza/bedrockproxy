@@ -3,7 +3,7 @@ WORKDIR /app/web
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile
 COPY web/ ./
-RUN pnpm exec vite build
+RUN pnpm run build
 
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS backend
 ARG TARGETOS TARGETARCH
@@ -11,7 +11,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=frontend /app/web/dist ./web/dist
+COPY --from=frontend /app/web/dist ./dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /bedrockproxy .
 
 FROM alpine:3.21

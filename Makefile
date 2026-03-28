@@ -1,10 +1,11 @@
-.PHONY: build build-frontend dev dev-frontend test clean
+.PHONY: build generate dev dev-frontend test clean
 
-build: build-frontend
+build:
+	go generate .
 	go build -o bin/bedrockproxy .
 
-build-frontend:
-	cd web && pnpm install && pnpm exec vite build
+generate:
+	go generate .
 
 dev:
 	go run . -config config.yaml
@@ -16,4 +17,4 @@ test:
 	go test ./...
 
 clean:
-	rm -rf bin/ web/dist/
+	rm -rf bin/ dist/ web/dist/

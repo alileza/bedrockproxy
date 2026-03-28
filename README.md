@@ -1,4 +1,6 @@
-# bedrockproxy
+<p><img src="web/public/logo.svg" width="48" align="left" style="margin-right: 12px" /> <strong style="font-size: 2em">bedrockproxy</strong></p>
+
+<br clear="left" />
 
 A thin proxy in front of AWS Bedrock that tracks who's using what, how much it costs, and shows it all in a real-time dashboard.
 

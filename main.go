@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -18,6 +19,10 @@ import (
 	"bedrockproxy/internal/store"
 	"bedrockproxy/internal/usage"
 )
+
+//go:generate sh -c "if command -v pnpm >/dev/null 2>&1; then cd web && pnpm install && pnpm run build && cd .. && rm -rf dist && cp -r web/dist dist; elif [ ! -d dist ]; then mkdir -p dist && echo '<!DOCTYPE html><html><body>frontend not built</body></html>' > dist/index.html; fi"
+//go:embed all:dist
+var embeddedFrontend embed.FS
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")

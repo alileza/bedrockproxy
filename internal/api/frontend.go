@@ -9,7 +9,7 @@ import (
 
 // RegisterFrontend serves the embedded React build, falling back to index.html for SPA routing.
 func RegisterFrontend(mux *http.ServeMux, dist embed.FS) {
-	sub, err := fs.Sub(dist, "web/dist")
+	sub, err := fs.Sub(dist, "dist")
 	if err != nil {
 		return
 	}
