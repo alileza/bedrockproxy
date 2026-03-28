@@ -5,3 +5,4 @@ web/dist/
 .env
 *.exe
 .bedrockproxy-callers.json
+coverage.out
