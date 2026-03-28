@@ -51,9 +51,19 @@ type QuotaWithUsage struct {
 
 // Engine evaluates quotas against caller usage data from the store.
 type Engine struct {
-	mu     sync.RWMutex
-	quotas map[string]Quota
-	store  *store.Store
+	mu       sync.RWMutex
+	quotas   map[string]Quota
+	store    *store.Store
+	skipDisk bool // when true, skip disk persistence (for tests)
+}
+
+// NewTestEngine creates a quota engine without disk persistence. For use in tests.
+func NewTestEngine(s *store.Store) *Engine {
+	return &Engine{
+		quotas:   make(map[string]Quota),
+		store:    s,
+		skipDisk: true,
+	}
 }
 
 // NewEngine creates a quota engine. Config quotas are loaded first as defaults,
@@ -215,6 +225,9 @@ func (e *Engine) loadFromDisk() {
 }
 
 func (e *Engine) saveToDisk() {
+	if e.skipDisk {
+		return
+	}
 	e.mu.RLock()
 	quotas := make([]Quota, 0, len(e.quotas))
 	for _, q := range e.quotas {

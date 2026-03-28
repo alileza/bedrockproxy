@@ -57,9 +57,12 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) routes() {
-	// Bedrock proxy endpoints (clients call these)
-	r.mux.HandleFunc("POST /model/{modelId}/converse", r.proxy.HandleConverse)
-	r.mux.HandleFunc("POST /model/{modelId}/invoke", r.proxy.HandleInvokeModel)
+	// Bedrock proxy -- catch-all for all bedrock-runtime paths
+	if r.proxy != nil {
+		r.mux.HandleFunc("/model/", r.proxy.HandleProxy)
+		r.mux.HandleFunc("/guardrail/", r.proxy.HandleProxy)
+		r.mux.HandleFunc("/async-invoke", r.proxy.HandleProxy)
+	}
 
 	// Prometheus metrics
 	r.mux.Handle("GET /metrics", promhttp.Handler())
