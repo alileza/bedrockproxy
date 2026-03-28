@@ -18,8 +18,14 @@ s3:
 #     input_price_per_million: 3.0
 #     output_price_per_million: 15.0
 #     enabled: true
-#   - id: "anthropic.claude-haiku-4-5-20251001-v1:0"
-#     name: "Claude Haiku 4.5"
-#     input_price_per_million: 0.8
-#     output_price_per_million: 4.0
-#     enabled: true
+
+# Quotas: default limits per caller. Can be overridden at runtime via API
+# (persisted to .bedrockproxy-quotas.json).
+quotas:
+  - id: "staging-admin"
+    match: "account:590211171383"
+    cost_per_day: 10.0
+    tokens_per_day: 1000000
+    requests_per_minute: 60
+    mode: "warn"
+    enabled: true

@@ -1,7 +1,7 @@
 const BASE = "/api";
 
-async function fetchJSON<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, init);
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -58,6 +58,31 @@ export const TIME_RANGES: TimeRange[] = [
   { label: "7d", minutes: 10080 },
 ];
 
+export type QuotaMode = "warn" | "reject";
+
+export interface QuotaWithUsage {
+  id: string;
+  match: string;
+  tokens_per_day: number;
+  requests_per_minute: number;
+  cost_per_day: number;
+  mode: QuotaMode;
+  enabled: boolean;
+  tokens_used_today: number;
+  cost_used_today: number;
+  requests_last_minute: number;
+}
+
+export interface QuotaInput {
+  id: string;
+  match: string;
+  tokens_per_day: number;
+  requests_per_minute: number;
+  cost_per_day: number;
+  mode: QuotaMode;
+  enabled: boolean;
+}
+
 export const api = {
   getUsageSummary: (minutes = 43200) =>
     fetchJSON<UsageSummary>(`/usage/summary?minutes=${minutes}`),
@@ -66,4 +91,16 @@ export const api = {
   getActivity: (limit = 50) =>
     fetchJSON<ActivityEntry[]>(`/usage/activity?limit=${limit}`),
   getModels: () => fetchJSON<Model[]>("/models"),
+
+  getQuotas: () => fetchJSON<QuotaWithUsage[]>("/quotas"),
+  setQuota: (q: QuotaInput) =>
+    fetchJSON<QuotaInput>("/quotas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(q),
+    }),
+  deleteQuota: (id: string) =>
+    fetchJSON<{ status: string }>(`/quotas/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
 };

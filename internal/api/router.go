@@ -11,6 +11,7 @@ import (
 
 	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/proxy"
+	"bedrockproxy/internal/quota"
 	"bedrockproxy/internal/store"
 )
 
@@ -27,12 +28,26 @@ type Router struct {
 	store    *store.Store
 	proxy    *proxy.Proxy
 	resolver *auth.Resolver
+	quotaEng *quota.Engine
 	mux      *http.ServeMux
 	events   *EventBus
 }
 
-func NewRouter(s *store.Store, proxy *proxy.Proxy, resolver *auth.Resolver, events *EventBus) *Router {
+// RouterOption configures optional Router dependencies.
+type RouterOption func(*Router)
+
+// WithQuotaEngine sets the quota engine on the router.
+func WithQuotaEngine(e *quota.Engine) RouterOption {
+	return func(r *Router) {
+		r.quotaEng = e
+	}
+}
+
+func NewRouter(s *store.Store, proxy *proxy.Proxy, resolver *auth.Resolver, events *EventBus, opts ...RouterOption) *Router {
 	r := &Router{store: s, proxy: proxy, resolver: resolver, mux: http.NewServeMux(), events: events}
+	for _, o := range opts {
+		o(r)
+	}
 	r.routes()
 	return r
 }
@@ -59,6 +74,11 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /api/usage/callers", r.handleCallers)
 	r.mux.HandleFunc("GET /api/usage/activity", r.handleActivity)
 	r.mux.HandleFunc("GET /api/models", r.handleModels)
+
+	// Quota management
+	r.mux.HandleFunc("GET /api/quotas", r.handleGetQuotas)
+	r.mux.HandleFunc("POST /api/quotas", r.handleSetQuota)
+	r.mux.HandleFunc("DELETE /api/quotas/{id}", r.handleDeleteQuota)
 }
 
 func (r *Router) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -155,6 +175,58 @@ func (r *Router) handleRegisterCaller(w http.ResponseWriter, req *http.Request) 
 	}
 
 	writeJSON(w, map[string]string{"status": "registered", "access_key_id": caller.AccessKeyID, "arn": body.ARN})
+}
+
+func (r *Router) handleGetQuotas(w http.ResponseWriter, _ *http.Request) {
+	if r.quotaEng == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	quotas := r.quotaEng.GetQuotasWithUsage()
+	if quotas == nil {
+		quotas = []quota.QuotaWithUsage{}
+	}
+	writeJSON(w, quotas)
+}
+
+func (r *Router) handleSetQuota(w http.ResponseWriter, req *http.Request) {
+	if r.quotaEng == nil {
+		http.Error(w, `{"message":"quota engine not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	var q quota.Quota
+	if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+		http.Error(w, `{"message":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if q.ID == "" {
+		http.Error(w, `{"message":"id is required"}`, http.StatusBadRequest)
+		return
+	}
+	if q.Match == "" {
+		http.Error(w, `{"message":"match is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	r.quotaEng.SetQuota(q)
+	writeJSON(w, q)
+}
+
+func (r *Router) handleDeleteQuota(w http.ResponseWriter, req *http.Request) {
+	if r.quotaEng == nil {
+		http.Error(w, `{"message":"quota engine not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	id := req.PathValue("id")
+	if id == "" {
+		http.Error(w, `{"message":"id is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	r.quotaEng.DeleteQuota(id)
+	writeJSON(w, map[string]string{"status": "deleted"})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

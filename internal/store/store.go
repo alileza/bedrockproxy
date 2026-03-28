@@ -384,6 +384,58 @@ func (s *Store) GetModels() []Model {
 	return result
 }
 
+// GetCallerUsageToday returns token and cost usage since midnight UTC, plus
+// request count from the last 60 seconds, for callers matching the given
+// accountID or role ARN. Pass "*" for both to aggregate all callers.
+func (s *Store) GetCallerUsageToday(accountID, role string) (tokens int64, cost float64, requestsLastMinute int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	now := time.Now().UTC()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	oneMinuteAgo := now.Add(-60 * time.Second)
+
+	for i := range s.requests {
+		r := &s.requests[i]
+		if r.CreatedAt.Before(midnight) {
+			continue
+		}
+
+		if !s.callerMatchesLocked(r.AccessKeyID, accountID, role) {
+			continue
+		}
+
+		tokens += int64(r.InputTokens) + int64(r.OutputTokens)
+		cost += r.CostUSD
+
+		if !r.CreatedAt.Before(oneMinuteAgo) {
+			requestsLastMinute++
+		}
+	}
+	return
+}
+
+// callerMatchesLocked checks whether the request's access key belongs to
+// a caller matching the given accountID or role ARN. Must hold s.mu.
+func (s *Store) callerMatchesLocked(accessKeyID, accountID, role string) bool {
+	if accountID == "*" && role == "*" {
+		return true
+	}
+
+	c, ok := s.callers[accessKeyID]
+	if !ok {
+		return false
+	}
+
+	if accountID != "" && accountID != "*" && c.AccountID == accountID {
+		return true
+	}
+	if role != "" && role != "*" && c.RoleARN == role {
+		return true
+	}
+	return false
+}
+
 // FlushRequests returns all current requests and clears the internal slice.
 func (s *Store) FlushRequests() []Request {
 	s.mu.Lock()

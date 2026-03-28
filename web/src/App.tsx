@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, TIME_RANGES, type TimeRange } from "./api/client";
 import { TimeRangePicker } from "./components/TimeRangePicker";
 import { StatCard } from "./components/StatCard";
 import { Table } from "./components/Table";
 import { StatusBadge } from "./components/StatusBadge";
+import { QuotaSection } from "./components/QuotaSection";
 import { useWS, useWSStatus } from "./hooks/useSSE";
 import {
   formatCost,
@@ -149,6 +150,9 @@ export function App() {
             />
           </div>
         )}
+
+        {/* Quotas */}
+        <QuotaSection />
 
         {/* Activity */}
         <h2 className="text-sm font-[580] text-content-secondary uppercase tracking-wide mb-3">

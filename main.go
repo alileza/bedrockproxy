@@ -17,6 +17,7 @@ import (
 	"bedrockproxy/internal/config"
 	"bedrockproxy/internal/pricing"
 	"bedrockproxy/internal/proxy"
+	"bedrockproxy/internal/quota"
 	"bedrockproxy/internal/store"
 	"bedrockproxy/internal/usage"
 )
@@ -67,12 +68,14 @@ func run(configPath string) error {
 		return fmt.Errorf("create resolver: %w", err)
 	}
 
-	p, err := proxy.New(ctx, cfg.AWS.Region, tracker, resolver)
+	quotaEngine := quota.NewEngine(s, cfg.Quotas)
+
+	p, err := proxy.New(ctx, cfg.AWS.Region, tracker, resolver, proxy.WithQuotaEngine(quotaEngine))
 	if err != nil {
 		return fmt.Errorf("create proxy: %w", err)
 	}
 
-	router := api.NewRouter(s, p, resolver, events)
+	router := api.NewRouter(s, p, resolver, events, api.WithQuotaEngine(quotaEngine))
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

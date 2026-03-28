@@ -17,6 +17,7 @@ import (
 
 	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/metrics"
+	"bedrockproxy/internal/quota"
 	"bedrockproxy/internal/usage"
 )
 
@@ -25,10 +26,11 @@ type Proxy struct {
 	client   *bedrockruntime.Client
 	tracker  *usage.Tracker
 	resolver *auth.Resolver
+	quotaEng *quota.Engine
 	region   string
 }
 
-func New(ctx context.Context, region string, tracker *usage.Tracker, resolver *auth.Resolver) (*Proxy, error) {
+func New(ctx context.Context, region string, tracker *usage.Tracker, resolver *auth.Resolver, opts ...Option) (*Proxy, error) {
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
@@ -36,12 +38,26 @@ func New(ctx context.Context, region string, tracker *usage.Tracker, resolver *a
 
 	client := bedrockruntime.NewFromConfig(cfg)
 
-	return &Proxy{
+	p := &Proxy{
 		client:   client,
 		tracker:  tracker,
 		resolver: resolver,
 		region:   region,
-	}, nil
+	}
+	for _, o := range opts {
+		o(p)
+	}
+	return p, nil
+}
+
+// Option configures optional Proxy dependencies.
+type Option func(*Proxy)
+
+// WithQuotaEngine sets the quota engine for the proxy.
+func WithQuotaEngine(e *quota.Engine) Option {
+	return func(p *Proxy) {
+		p.quotaEng = e
+	}
 }
 
 // converseRequest is the JSON body format for the Converse API.
@@ -113,6 +129,10 @@ func (p *Proxy) HandleConverse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.resolveCaller(r, caller)
+
+	if blocked := p.checkQuota(w, caller.AccessKeyID); blocked {
+		return
+	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -188,6 +208,10 @@ func (p *Proxy) HandleInvokeModel(w http.ResponseWriter, r *http.Request) {
 
 	p.resolveCaller(r, caller)
 
+	if blocked := p.checkQuota(w, caller.AccessKeyID); blocked {
+		return
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, `{"message":"failed to read request body"}`, http.StatusBadRequest)
@@ -250,6 +274,51 @@ func extractTokenCounts(body []byte) (inputTokens, outputTokens int) {
 		return resp.Usage.InputTokens, resp.Usage.OutputTokens
 	}
 	return 0, 0
+}
+
+// checkQuota evaluates the caller against the quota engine.
+// Returns true if the request was blocked (response already written).
+func (p *Proxy) checkQuota(w http.ResponseWriter, accessKeyID string) bool {
+	if p.quotaEng == nil {
+		return false
+	}
+
+	callerARN := ""
+	callerAccountID := ""
+	if p.resolver != nil {
+		callerARN = p.resolver.GetRoleARN(accessKeyID)
+		callerAccountID = p.resolver.GetAccountID(accessKeyID)
+	}
+
+	result := p.quotaEng.Check(callerARN, callerAccountID)
+	if result.Allowed {
+		return false
+	}
+
+	mode := p.quotaEng.GetMode(result.QuotaID)
+	callerLabel := callerARN
+	if callerLabel == "" {
+		callerLabel = accessKeyID
+	}
+
+	metrics.QuotaExceededTotal.WithLabelValues(result.QuotaID, string(mode), callerLabel).Inc()
+
+	if mode == quota.ModeReject {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "quota exceeded: " + result.Reason,
+		})
+		return true
+	}
+
+	// warn mode — log but allow
+	slog.Warn("quota exceeded (warn mode)",
+		"quota_id", result.QuotaID,
+		"reason", result.Reason,
+		"caller", callerLabel,
+	)
+	return false
 }
 
 // resolveCaller triggers identity resolution for the caller.

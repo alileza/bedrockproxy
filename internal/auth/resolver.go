@@ -94,3 +94,13 @@ func (r *Resolver) resolve(ctx context.Context, accessKeyID string) {
 func (r *Resolver) UpdateRoleARN(_ context.Context, accessKeyID, roleARN string) {
 	r.store.UpdateCallerARN(accessKeyID, roleARN)
 }
+
+// GetRoleARN returns the resolved role ARN for a caller.
+func (r *Resolver) GetRoleARN(accessKeyID string) string {
+	return r.store.GetCallerRoleARN(accessKeyID)
+}
+
+// GetAccountID returns the resolved account ID for a caller.
+func (r *Resolver) GetAccountID(accessKeyID string) string {
+	return r.store.GetCallerAccountID(accessKeyID)
+}

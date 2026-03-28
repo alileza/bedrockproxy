@@ -41,4 +41,14 @@ var (
 		Name: "bedrockproxy_websocket_clients",
 		Help: "Number of connected WebSocket clients.",
 	})
+
+	QuotaExceededTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bedrockproxy_quota_exceeded_total",
+		Help: "Total number of requests that exceeded a quota.",
+	}, []string{"quota_id", "mode", "caller"})
+
+	QuotaUsageRatio = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "bedrockproxy_quota_usage_ratio",
+		Help: "Current usage as a ratio of the quota limit.",
+	}, []string{"quota_id", "resource"})
 )

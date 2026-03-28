@@ -8,10 +8,21 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	AWS    AWSConfig    `yaml:"aws"`
-	S3     S3Config     `yaml:"s3"`
+	Server ServerConfig  `yaml:"server"`
+	AWS    AWSConfig     `yaml:"aws"`
+	S3     S3Config      `yaml:"s3"`
 	Models []ModelConfig `yaml:"models"`
+	Quotas []QuotaConfig `yaml:"quotas"`
+}
+
+type QuotaConfig struct {
+	ID                string  `yaml:"id" json:"id"`
+	Match             string  `yaml:"match" json:"match"`
+	TokensPerDay      int64   `yaml:"tokens_per_day" json:"tokens_per_day"`
+	RequestsPerMinute int     `yaml:"requests_per_minute" json:"requests_per_minute"`
+	CostPerDay        float64 `yaml:"cost_per_day" json:"cost_per_day"`
+	Mode              string  `yaml:"mode" json:"mode"`
+	Enabled           bool    `yaml:"enabled" json:"enabled"`
 }
 
 type ServerConfig struct {
