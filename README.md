@@ -12,14 +12,22 @@ A thin proxy in front of AWS Bedrock that tracks who's using what, how much it c
 
 ## Why not LiteLLM / Bifrost / etc?
 
-Those are great tools, but they solve a different problem. They require new API keys, SDK changes, and infrastructure (Postgres, Redis). bedrockproxy is different:
+Those are great tools, but they solve a different problem.
 
-- **Zero client changes** — same AWS SDK, same SigV4 auth, just change the endpoint URL
-- **Tracks real IAM roles** — not virtual API keys, actual AWS identities
-- **No infrastructure** — single 16MB binary, in-memory store, no database
-- **No new auth system** — your existing IAM roles and policies work as-is
+|  | bedrockproxy | LiteLLM / others |
+|---|---|---|
+| **Migration cost** | Change one line: `endpoint_url` | New SDK integration, new API keys, new auth flow per service |
+| **Operational cost** | Single binary, ~20MB RAM, no database | Postgres + Redis + Python runtime |
+| **Infrastructure** | One pod on EKS, that's it | Database provisioning, connection pooling, migrations, backups |
+| **Auth model** | Your existing IAM roles, unchanged | Issue and manage virtual API keys per team |
+| **Identity tracking** | Real AWS IAM role ARNs | Virtual key labels |
+| **Time to value** | Deploy → see data in minutes | Weeks of integration across services |
 
-If you need multi-provider routing or 200+ model support, use LiteLLM. If you need visibility into who's calling Bedrock and how much it costs — without touching any client code — use this.
+### When to use what
+
+**Use bedrockproxy** if you're on AWS Bedrock and want visibility into who's calling what without touching any client code. Deploy it, change the endpoint URL, done.
+
+**Use LiteLLM** if you need multi-provider routing (OpenAI + Anthropic + Bedrock), budget enforcement, or OpenAI-compatible API translation.
 
 ## How it works
 
