@@ -10,6 +10,17 @@ A thin proxy in front of AWS Bedrock that tracks who's using what, how much it c
 
 ![Dashboard](docs/dashboard.png)
 
+## Why not LiteLLM / Bifrost / etc?
+
+Those are great tools, but they solve a different problem. They require new API keys, SDK changes, and infrastructure (Postgres, Redis). bedrockproxy is different:
+
+- **Zero client changes** — same AWS SDK, same SigV4 auth, just change the endpoint URL
+- **Tracks real IAM roles** — not virtual API keys, actual AWS identities
+- **No infrastructure** — single 16MB binary, in-memory store, no database
+- **No new auth system** — your existing IAM roles and policies work as-is
+
+If you need multi-provider routing or 200+ model support, use LiteLLM. If you need visibility into who's calling Bedrock and how much it costs — without touching any client code — use this.
+
 ## How it works
 
 ```
