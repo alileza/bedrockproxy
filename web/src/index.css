@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  /* Trade Republic Design System — Light (default) */
+  /* Design tokens — Light (default) */
   --color-content-primary: #000000;
   --color-content-secondary: #8c939c;
   --color-content-tertiary: #c4cbd1;
@@ -38,8 +38,7 @@
   --radius-md: 16px;
   --radius-lg: 24px;
 
-  --font-sans: "TradeRepublicSans", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Roboto, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 /* Dark mode overrides */

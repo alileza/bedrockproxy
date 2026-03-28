@@ -17,7 +17,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 
-	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/config"
 	"bedrockproxy/internal/quota"
 	"bedrockproxy/internal/store"
@@ -33,6 +32,8 @@ func (staticCreds) Retrieve(ctx context.Context) (aws.Credentials, error) {
 		SecretAccessKey: "proxy-secret-key-for-testing-only",
 	}, nil
 }
+
+const testCallerARN = "arn:aws:sts::123456789012:assumed-role/TestRole/session"
 
 // newTestProxy creates a proxy pointed at the given test server.
 func newTestProxy(t *testing.T, backend *httptest.Server, models ...config.ModelConfig) (*Proxy, *store.Store) {
@@ -73,24 +74,20 @@ func newTestProxyWithQuota(t *testing.T, backend *httptest.Server, quotas []quot
 		qe.SetQuota(q)
 	}
 
-	// Create a resolver backed by the test store (no real STS calls).
-	resolver, _ := auth.NewResolver(context.Background(), "us-east-1", s)
-
 	return &Proxy{
 		target:   target,
 		signer:   v4.NewSigner(),
 		creds:    staticCreds{},
 		tracker:  tracker,
-		resolver: resolver,
 		region:   "us-east-1",
 		client:   backend.Client(),
 		quotaEng: qe,
 	}, s
 }
 
-// sigV4Header builds a valid-looking SigV4 Authorization header for testing.
-func sigV4Header(accessKeyID string) string {
-	return fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/20260327/us-east-1/bedrock/aws4_request, SignedHeaders=host;x-amz-date, Signature=abc123", accessKeyID)
+// callerQuery returns a query string with the caller param set.
+func callerQuery(callerARN string) string {
+	return "?caller=" + url.QueryEscape(callerARN)
 }
 
 // ---- Tests ----
@@ -233,8 +230,7 @@ func TestHandleProxy_ForwardPath(t *testing.T) {
 	p, _ := newTestProxy(t, backend)
 
 	body := `{"messages":[{"role":"user","content":[{"text":"hello"}]}]}`
-	req := httptest.NewRequest(http.MethodPost, "/model/anthropic.claude-3-sonnet/converse", strings.NewReader(body))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/anthropic.claude-3-sonnet/converse"+callerQuery(testCallerARN), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -262,8 +258,7 @@ func TestHandleProxy_ForwardQueryParams(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke?param=value&foo=bar", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke?caller="+url.QueryEscape(testCallerARN)+"&param=value&foo=bar", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -277,6 +272,10 @@ func TestHandleProxy_ForwardQueryParams(t *testing.T) {
 	}
 	if receivedQuery.Get("foo") != "bar" {
 		t.Errorf("backend query foo = %q, want 'bar'", receivedQuery.Get("foo"))
+	}
+	// caller param should be stripped
+	if receivedQuery.Get("caller") != "" {
+		t.Errorf("caller query param should be stripped, got %q", receivedQuery.Get("caller"))
 	}
 }
 
@@ -292,8 +291,7 @@ func TestHandleProxy_ForwardRequestBody(t *testing.T) {
 	p, _ := newTestProxy(t, backend)
 
 	sentBody := `{"messages":[{"role":"user","content":[{"text":"test body forwarding"}]}]}`
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke", strings.NewReader(sentBody))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke"+callerQuery(testCallerARN), strings.NewReader(sentBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -314,8 +312,7 @@ func TestHandleProxy_Error429Forwarded(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -341,8 +338,7 @@ func TestHandleProxy_Error400Forwarded(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/invalid-model/converse", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/invalid-model/converse"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -367,8 +363,7 @@ func TestHandleProxy_Error500Forwarded(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -379,7 +374,7 @@ func TestHandleProxy_Error500Forwarded(t *testing.T) {
 	}
 }
 
-func TestHandleProxy_MissingSigV4(t *testing.T) {
+func TestHandleProxy_MissingCallerParam(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("backend should not have been called")
 	}))
@@ -388,13 +383,16 @@ func TestHandleProxy_MissingSigV4(t *testing.T) {
 	p, _ := newTestProxy(t, backend)
 
 	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse", strings.NewReader(`{}`))
-	// No Authorization header.
+	// No caller query param.
 
 	w := httptest.NewRecorder()
 	p.HandleProxy(w, req)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "missing 'caller' query parameter") {
+		t.Errorf("response should mention missing caller param, got %q", w.Body.String())
 	}
 }
 
@@ -414,10 +412,7 @@ func TestHandleProxy_NonStreamingUsageExtracted(t *testing.T) {
 	}
 	p, s := newTestProxy(t, backend, models...)
 
-	// Use the tracker's synchronous record method indirectly -- the Record call is async,
-	// so we need to give it a moment.
-	req := httptest.NewRequest(http.MethodPost, "/model/anthropic.claude-3-sonnet/converse", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/anthropic.claude-3-sonnet/converse"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -466,8 +461,7 @@ func TestHandleProxy_StreamingResponsePipedThrough(t *testing.T) {
 
 	p, s := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse-stream", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse-stream"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -517,8 +511,7 @@ func TestHandleProxy_InvokeWithResponseStream(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke-with-response-stream", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke-with-response-stream"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -545,8 +538,7 @@ func TestHandleProxy_CountTokens(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/count-tokens", strings.NewReader(`{"messages":[]}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/count-tokens"+callerQuery(testCallerARN), strings.NewReader(`{"messages":[]}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -572,8 +564,7 @@ func TestHandleProxy_GuardrailPath(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/guardrail/gr-abc123/version/1/apply", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/guardrail/gr-abc123/version/1/apply"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -596,8 +587,7 @@ func TestHandleProxy_ResponseHeadersForwarded(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -620,6 +610,8 @@ func TestHandleProxy_QuotaReject(t *testing.T) {
 	}))
 	defer backend.Close()
 
+	callerARN := "arn:aws:sts::123456789012:assumed-role/TestRole/session"
+
 	p, s := newTestProxyWithQuota(t, backend, []quota.Quota{
 		{
 			ID:           "test-quota",
@@ -630,23 +622,15 @@ func TestHandleProxy_QuotaReject(t *testing.T) {
 		},
 	})
 
-	// Set up the caller with an account ID so the quota matcher can find them.
-	c := s.EnsureCaller("AKIAIOSFODNN7EXAMPLE")
-	c.AccountID = "123456789012"
-	c.RoleARN = "arn:aws:sts::123456789012:assumed-role/TestRole/session"
-	// Store the ARN so the resolver can return it.
-	s.UpdateCallerARN("AKIAIOSFODNN7EXAMPLE", "arn:aws:sts::123456789012:assumed-role/TestRole/session")
-
 	// Record enough usage to exceed quota.
 	s.RecordRequest(store.Request{
-		AccessKeyID:  "AKIAIOSFODNN7EXAMPLE",
+		CallerARN:    callerARN,
 		InputTokens:  50,
 		OutputTokens: 51,
 		CreatedAt:    time.Now().UTC(),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse"+callerQuery(callerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -670,6 +654,8 @@ func TestHandleProxy_QuotaWarnAllows(t *testing.T) {
 	}))
 	defer backend.Close()
 
+	callerARN := "arn:aws:sts::123456789012:assumed-role/TestRole/session"
+
 	p, s := newTestProxyWithQuota(t, backend, []quota.Quota{
 		{
 			ID:           "warn-quota",
@@ -680,22 +666,15 @@ func TestHandleProxy_QuotaWarnAllows(t *testing.T) {
 		},
 	})
 
-	// Set up the caller so the quota matcher can find them.
-	c := s.EnsureCaller("AKIAIOSFODNN7EXAMPLE")
-	c.AccountID = "123456789012"
-	c.RoleARN = "arn:aws:sts::123456789012:assumed-role/TestRole/session"
-	s.UpdateCallerARN("AKIAIOSFODNN7EXAMPLE", "arn:aws:sts::123456789012:assumed-role/TestRole/session")
-
 	// Record enough usage to exceed quota.
 	s.RecordRequest(store.Request{
-		AccessKeyID:  "AKIAIOSFODNN7EXAMPLE",
+		CallerARN:    callerARN,
 		InputTokens:  50,
 		OutputTokens: 51,
 		CreatedAt:    time.Now().UTC(),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/converse"+callerQuery(callerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -718,8 +697,7 @@ func TestHandleProxy_RequestIsSigned(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -731,10 +709,6 @@ func TestHandleProxy_RequestIsSigned(t *testing.T) {
 	}
 	if !strings.Contains(receivedAuthHeader, "AKIAPROXYTEST1234567") {
 		t.Errorf("outbound request should use proxy credentials, got %q", receivedAuthHeader)
-	}
-	// It should NOT contain the original caller's access key.
-	if strings.Contains(receivedAuthHeader, "AKIAIOSFODNN7EXAMPLE") {
-		t.Error("outbound request should NOT contain the original caller's credentials")
 	}
 }
 
@@ -751,8 +725,7 @@ func TestHandleProxy_ContentTypeHeaderForwarded(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
@@ -780,8 +753,7 @@ func TestHandleProxy_UsageFromHeaders(t *testing.T) {
 
 	p, s := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -821,8 +793,7 @@ func TestHandleProxy_ConcurrentRequests(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		go func(i int) {
 			defer wg.Done()
-			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/model/model-%d/converse", i), strings.NewReader(`{}`))
-			req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/model/model-%d/converse%s", i, callerQuery(testCallerARN)), strings.NewReader(`{}`))
 			req.Header.Set("Content-Type", "application/json")
 
 			w := httptest.NewRecorder()
@@ -857,8 +828,7 @@ func TestHandleProxy_LargeResponseBody(t *testing.T) {
 
 	p, _ := newTestProxy(t, backend)
 
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke"+callerQuery(testCallerARN), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -869,48 +839,6 @@ func TestHandleProxy_LargeResponseBody(t *testing.T) {
 	}
 	if w.Body.Len() != len(respBody) {
 		t.Errorf("response body length = %d, want %d", w.Body.Len(), len(respBody))
-	}
-}
-
-func TestHandleProxy_CallerARNHeader(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
-	}))
-	defer backend.Close()
-
-	s := store.New(nil)
-	tracker := usage.NewTracker(s, nil)
-
-	target, _ := url.Parse(backend.URL)
-	resolver, _ := auth.NewResolver(context.Background(), "us-east-1", s)
-
-	p := &Proxy{
-		target:   target,
-		signer:   v4.NewSigner(),
-		creds:    staticCreds{},
-		tracker:  tracker,
-		resolver: resolver,
-		region:   "us-east-1",
-		client:   backend.Client(),
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/model/test-model/invoke", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Bedrock-Caller-ARN", "arn:aws:sts::123456789012:assumed-role/TestRole/session")
-
-	w := httptest.NewRecorder()
-	p.HandleProxy(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	// Verify the ARN was stored.
-	arn := s.GetCallerRoleARN("AKIAIOSFODNN7EXAMPLE")
-	if arn != "arn:aws:sts::123456789012:assumed-role/TestRole/session" {
-		t.Errorf("stored ARN = %q, want the X-Bedrock-Caller-ARN value", arn)
 	}
 }
 
@@ -939,8 +867,7 @@ func TestHandleProxy_AllPathPatterns(t *testing.T) {
 
 			p, _ := newTestProxy(t, backend)
 
-			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
-			req.Header.Set("Authorization", sigV4Header("AKIAIOSFODNN7EXAMPLE"))
+			req := httptest.NewRequest(http.MethodPost, path+callerQuery(testCallerARN), strings.NewReader(`{}`))
 			req.Header.Set("Content-Type", "application/json")
 
 			w := httptest.NewRecorder()

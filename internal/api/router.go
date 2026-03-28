@@ -9,7 +9,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/proxy"
 	"bedrockproxy/internal/quota"
 	"bedrockproxy/internal/store"
@@ -27,7 +26,6 @@ func extractAccountFromARN(arn string) string {
 type Router struct {
 	store    *store.Store
 	proxy    *proxy.Proxy
-	resolver *auth.Resolver
 	quotaEng *quota.Engine
 	mux      *http.ServeMux
 	events   *EventBus
@@ -43,8 +41,8 @@ func WithQuotaEngine(e *quota.Engine) RouterOption {
 	}
 }
 
-func NewRouter(s *store.Store, proxy *proxy.Proxy, resolver *auth.Resolver, events *EventBus, opts ...RouterOption) *Router {
-	r := &Router{store: s, proxy: proxy, resolver: resolver, mux: http.NewServeMux(), events: events}
+func NewRouter(s *store.Store, proxy *proxy.Proxy, events *EventBus, opts ...RouterOption) *Router {
+	r := &Router{store: s, proxy: proxy, mux: http.NewServeMux(), events: events}
 	for _, o := range opts {
 		o(r)
 	}
@@ -66,9 +64,6 @@ func (r *Router) routes() {
 
 	// Prometheus metrics
 	r.mux.Handle("GET /metrics", promhttp.Handler())
-
-	// Caller self-registration — caller hits this to register their ARN
-	r.mux.HandleFunc("POST /api/register-caller", r.handleRegisterCaller)
 
 	// Dashboard API endpoints
 	r.mux.HandleFunc("GET /api/ws", r.events.HandleWS)
@@ -104,11 +99,11 @@ func (r *Router) handleCallers(w http.ResponseWriter, req *http.Request) {
 
 	type callerWithQuota struct {
 		store.CallerStats
-		QuotaID       string  `json:"quota_id,omitempty"`
-		QuotaMatch    string  `json:"quota_match,omitempty"`
-		QuotaMode     string  `json:"quota_mode,omitempty"`
-		QuotaExceeded bool    `json:"quota_exceeded"`
-		QuotaReason   string  `json:"quota_reason,omitempty"`
+		QuotaID       string `json:"quota_id,omitempty"`
+		QuotaMatch    string `json:"quota_match,omitempty"`
+		QuotaMode     string `json:"quota_mode,omitempty"`
+		QuotaExceeded bool   `json:"quota_exceeded"`
+		QuotaReason   string `json:"quota_reason,omitempty"`
 	}
 
 	result := make([]callerWithQuota, 0, len(callers))
@@ -155,7 +150,7 @@ func (r *Router) handleActivity(w http.ResponseWriter, req *http.Request) {
 	for _, a := range activities {
 		result = append(result, activity{
 			ID:           a.ID,
-			Caller:       a.AccessKeyID, // Already enriched by GetActivity
+			Caller:       a.CallerARN,
 			ModelID:      a.ModelID,
 			Operation:    a.Operation,
 			InputTokens:  a.InputTokens,
@@ -175,35 +170,6 @@ func (r *Router) handleModels(w http.ResponseWriter, _ *http.Request) {
 		models = []store.Model{}
 	}
 	writeJSON(w, models)
-}
-
-func (r *Router) handleRegisterCaller(w http.ResponseWriter, req *http.Request) {
-	caller, err := auth.ParseSigV4(req)
-	if err != nil {
-		http.Error(w, `{"message":"missing SigV4 Authorization header"}`, http.StatusUnauthorized)
-		return
-	}
-
-	var body struct {
-		ARN       string `json:"arn"`
-		AccountID string `json:"account_id"`
-		UserID    string `json:"user_id"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.ARN == "" {
-		http.Error(w, `{"message":"body must contain 'arn'"}`, http.StatusBadRequest)
-		return
-	}
-
-	// Extract account ID from ARN: arn:aws:sts::123456789012:assumed-role/...
-	if accountID := extractAccountFromARN(body.ARN); accountID != "" {
-		r.store.EnsureCaller(caller.AccessKeyID)
-		r.store.UpdateCallerAccount(caller.AccessKeyID, accountID)
-	}
-	if r.resolver != nil {
-		r.resolver.UpdateRoleARN(req.Context(), caller.AccessKeyID, body.ARN)
-	}
-
-	writeJSON(w, map[string]string{"status": "registered", "access_key_id": caller.AccessKeyID, "arn": body.ARN})
 }
 
 func (r *Router) handleGetQuotas(w http.ResponseWriter, _ *http.Request) {

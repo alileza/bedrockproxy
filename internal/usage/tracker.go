@@ -13,7 +13,7 @@ import (
 
 // Request represents a single proxied Bedrock call.
 type Request struct {
-	AccessKeyID  string
+	CallerARN    string
 	ModelID      string
 	Operation    string
 	InputTokens  int
@@ -59,7 +59,7 @@ func (t *Tracker) record(req Request) {
 	costUSD := t.calculateCost(req.ModelID, req.InputTokens, req.OutputTokens)
 
 	t.store.RecordRequest(store.Request{
-		AccessKeyID:  req.AccessKeyID,
+		CallerARN:    req.CallerARN,
 		ModelID:      req.ModelID,
 		Operation:    req.Operation,
 		InputTokens:  req.InputTokens,
@@ -74,10 +74,10 @@ func (t *Tracker) record(req Request) {
 	status := fmt.Sprintf("%d", req.StatusCode)
 	metrics.RequestsTotal.WithLabelValues(req.ModelID, req.Operation, status).Inc()
 	metrics.RequestDuration.WithLabelValues(req.ModelID, req.Operation).Observe(float64(req.LatencyMs) / 1000)
-	metrics.InputTokensTotal.WithLabelValues(req.ModelID, req.AccessKeyID).Add(float64(req.InputTokens))
-	metrics.OutputTokensTotal.WithLabelValues(req.ModelID, req.AccessKeyID).Add(float64(req.OutputTokens))
+	metrics.InputTokensTotal.WithLabelValues(req.ModelID, req.CallerARN).Add(float64(req.InputTokens))
+	metrics.OutputTokensTotal.WithLabelValues(req.ModelID, req.CallerARN).Add(float64(req.OutputTokens))
 	if costUSD > 0 {
-		metrics.CostTotal.WithLabelValues(req.ModelID, req.AccessKeyID).Add(costUSD)
+		metrics.CostTotal.WithLabelValues(req.ModelID, req.CallerARN).Add(costUSD)
 	}
 
 	if t.Notify != nil {

@@ -35,7 +35,7 @@ func TestRecordRequest(t *testing.T) {
 	s := newTestStore()
 
 	s.RecordRequest(Request{
-		AccessKeyID:  "AKID1",
+		CallerARN:    "arn:aws:sts::111111111111:assumed-role/RoleA/session",
 		ModelID:      "model-a",
 		InputTokens:  100,
 		OutputTokens: 50,
@@ -43,7 +43,7 @@ func TestRecordRequest(t *testing.T) {
 	})
 
 	s.RecordRequest(Request{
-		AccessKeyID:  "AKID2",
+		CallerARN:    "arn:aws:sts::222222222222:assumed-role/RoleB/session",
 		ModelID:      "model-b",
 		InputTokens:  200,
 		OutputTokens: 100,
@@ -74,8 +74,8 @@ func TestRecordRequest_PreservesCreatedAt(t *testing.T) {
 	fixedTime := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
 
 	s.RecordRequest(Request{
-		AccessKeyID: "AKID1",
-		CreatedAt:   fixedTime,
+		CallerARN: "arn:aws:sts::111111111111:assumed-role/R/s",
+		CreatedAt: fixedTime,
 	})
 
 	s.mu.RLock()
@@ -89,70 +89,27 @@ func TestRecordRequest_PreservesCreatedAt(t *testing.T) {
 func TestEnsureCaller(t *testing.T) {
 	s := newTestStore()
 
-	c1 := s.EnsureCaller("AKID1")
+	c1 := s.EnsureCaller("arn:aws:sts::111111111111:assumed-role/R/s")
 	if c1 == nil {
 		t.Fatal("EnsureCaller returned nil for new caller")
 	}
-	if c1.AccessKeyID != "AKID1" {
-		t.Errorf("AccessKeyID = %q, want %q", c1.AccessKeyID, "AKID1")
+	if c1.ARN != "arn:aws:sts::111111111111:assumed-role/R/s" {
+		t.Errorf("ARN = %q, want %q", c1.ARN, "arn:aws:sts::111111111111:assumed-role/R/s")
 	}
 	if c1.FirstSeenAt.IsZero() {
 		t.Error("FirstSeenAt should be set")
 	}
 
 	// Calling again returns the same instance.
-	c2 := s.EnsureCaller("AKID1")
+	c2 := s.EnsureCaller("arn:aws:sts::111111111111:assumed-role/R/s")
 	if c1 != c2 {
 		t.Error("EnsureCaller should return the same pointer for existing caller")
 	}
 
-	// Different key creates a different caller.
-	c3 := s.EnsureCaller("AKID2")
+	// Different ARN creates a different caller.
+	c3 := s.EnsureCaller("arn:aws:sts::222222222222:assumed-role/R/s")
 	if c3 == c1 {
-		t.Error("different access key should create different caller")
-	}
-}
-
-func TestUpdateCallerARN_Propagation(t *testing.T) {
-	s := newTestStore()
-
-	// Set up two callers in the same account.
-	c1 := s.EnsureCaller("AKID1")
-	c1.AccountID = "111111111111"
-
-	c2 := s.EnsureCaller("AKID2")
-	c2.AccountID = "111111111111"
-
-	// Update ARN for the first caller; should propagate to sibling.
-	s.UpdateCallerARN("AKID1", "arn:aws:sts::111111111111:assumed-role/MyRole/session")
-
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if c1.RoleARN != "arn:aws:sts::111111111111:assumed-role/MyRole/session" {
-		t.Errorf("c1 RoleARN = %q, want the set ARN", c1.RoleARN)
-	}
-	if c2.RoleARN != "arn:aws:sts::111111111111:assumed-role/MyRole/session" {
-		t.Errorf("c2 RoleARN = %q, want propagated ARN", c2.RoleARN)
-	}
-}
-
-func TestUpdateCallerARN_NoPropagationToDifferentAccount(t *testing.T) {
-	s := newTestStore()
-
-	c1 := s.EnsureCaller("AKID1")
-	c1.AccountID = "111111111111"
-
-	c2 := s.EnsureCaller("AKID2")
-	c2.AccountID = "222222222222"
-
-	s.UpdateCallerARN("AKID1", "arn:aws:sts::111111111111:assumed-role/MyRole/session")
-
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if c2.RoleARN != "" {
-		t.Errorf("c2 RoleARN = %q, want empty (different account)", c2.RoleARN)
+		t.Error("different ARN should create different caller")
 	}
 }
 
@@ -161,14 +118,14 @@ func TestGetSummary(t *testing.T) {
 	now := time.Now().UTC()
 
 	s.RecordRequest(Request{
-		AccessKeyID:  "AKID1",
+		CallerARN:    "arn:aws:sts::111111111111:assumed-role/R/s",
 		InputTokens:  100,
 		OutputTokens: 50,
 		CostUSD:      0.01,
 		CreatedAt:    now.Add(-10 * time.Minute),
 	})
 	s.RecordRequest(Request{
-		AccessKeyID:  "AKID2",
+		CallerARN:    "arn:aws:sts::222222222222:assumed-role/R/s",
 		InputTokens:  200,
 		OutputTokens: 100,
 		CostUSD:      0.02,
@@ -176,7 +133,7 @@ func TestGetSummary(t *testing.T) {
 	})
 	// Old request that should be filtered out.
 	s.RecordRequest(Request{
-		AccessKeyID:  "AKID3",
+		CallerARN:    "arn:aws:sts::333333333333:assumed-role/R/s",
 		InputTokens:  999,
 		OutputTokens: 999,
 		CostUSD:      9.99,
@@ -215,29 +172,24 @@ func TestGetCallers(t *testing.T) {
 	s := newTestStore()
 	now := time.Now().UTC()
 
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "111111111111"
-	c.RoleARN = "arn:aws:sts::111111111111:assumed-role/RoleA/session"
+	arn1 := "arn:aws:sts::111111111111:assumed-role/RoleA/session"
+	arn2 := "arn:aws:sts::222222222222:assumed-role/RoleB/session"
 
 	s.RecordRequest(Request{
-		AccessKeyID: "AKID1",
-		CostUSD:     0.10,
-		CreatedAt:   now,
+		CallerARN: arn1,
+		CostUSD:   0.10,
+		CreatedAt: now,
 	})
 	s.RecordRequest(Request{
-		AccessKeyID: "AKID1",
-		CostUSD:     0.05,
-		CreatedAt:   now,
+		CallerARN: arn1,
+		CostUSD:   0.05,
+		CreatedAt: now,
 	})
 
-	c2 := s.EnsureCaller("AKID2")
-	c2.AccountID = "222222222222"
-	c2.RoleARN = "arn:aws:sts::222222222222:assumed-role/RoleB/session"
-
 	s.RecordRequest(Request{
-		AccessKeyID: "AKID2",
-		CostUSD:     0.20,
-		CreatedAt:   now,
+		CallerARN: arn2,
+		CostUSD:   0.20,
+		CreatedAt: now,
 	})
 
 	callers := s.GetCallers(now.Add(-1 * time.Hour))
@@ -246,12 +198,15 @@ func TestGetCallers(t *testing.T) {
 		t.Fatalf("expected 2 caller stats, got %d", len(callers))
 	}
 
-	// Sorted by cost descending, so AKID2's group should be first.
+	// Sorted by cost descending, so arn2 should be first.
 	if !floatEqual(callers[0].TotalCostUSD, 0.20) {
 		t.Errorf("callers[0].TotalCostUSD = %f, want 0.20", callers[0].TotalCostUSD)
 	}
 	if callers[0].TotalRequests != 1 {
 		t.Errorf("callers[0].TotalRequests = %d, want 1", callers[0].TotalRequests)
+	}
+	if callers[0].AccountID != "222222222222" {
+		t.Errorf("callers[0].AccountID = %q, want %q", callers[0].AccountID, "222222222222")
 	}
 	if !floatEqual(callers[1].TotalCostUSD, 0.15) {
 		t.Errorf("callers[1].TotalCostUSD = %f, want 0.15", callers[1].TotalCostUSD)
@@ -265,12 +220,11 @@ func TestGetCallers_UnknownCaller(t *testing.T) {
 	s := newTestStore()
 	now := time.Now().UTC()
 
-	// Record a request without pre-creating the caller via EnsureCaller+account info.
-	// RecordRequest calls ensureCallerLocked, but account/role will be empty.
+	// Record a request with an ARN that has no parseable account.
 	s.RecordRequest(Request{
-		AccessKeyID: "AKIDUNKNOWN",
-		CostUSD:     0.05,
-		CreatedAt:   now,
+		CallerARN: "unknown-caller",
+		CostUSD:   0.05,
+		CreatedAt: now,
 	})
 
 	callers := s.GetCallers(now.Add(-1 * time.Hour))
@@ -288,9 +242,9 @@ func TestGetActivity(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		s.RecordRequest(Request{
-			AccessKeyID: "AKID1",
-			ModelID:     "model-a",
-			CreatedAt:   now.Add(time.Duration(i) * time.Minute),
+			CallerARN: "arn:aws:sts::111111111111:assumed-role/R/s",
+			ModelID:   "model-a",
+			CreatedAt: now.Add(time.Duration(i) * time.Minute),
 		})
 	}
 
@@ -315,7 +269,7 @@ func TestGetActivity(t *testing.T) {
 func TestGetActivity_LimitExceedsTotal(t *testing.T) {
 	s := newTestStore()
 
-	s.RecordRequest(Request{AccessKeyID: "AKID1"})
+	s.RecordRequest(Request{CallerARN: "arn:aws:sts::111111111111:assumed-role/R/s"})
 
 	activity := s.GetActivity(100)
 	if len(activity) != 1 {
@@ -323,40 +277,23 @@ func TestGetActivity_LimitExceedsTotal(t *testing.T) {
 	}
 }
 
-func TestGetActivity_EnrichesWithRoleARN(t *testing.T) {
+func TestGetActivity_ShowsCallerARN(t *testing.T) {
 	s := newTestStore()
 
-	c := s.EnsureCaller("AKID1")
-	c.RoleARN = "arn:aws:iam::123456789012:role/TestRole"
-
-	s.RecordRequest(Request{AccessKeyID: "AKID1"})
+	arn := "arn:aws:iam::123456789012:role/TestRole"
+	s.RecordRequest(Request{CallerARN: arn})
 
 	activity := s.GetActivity(1)
-	if activity[0].AccessKeyID != "arn:aws:iam::123456789012:role/TestRole" {
-		t.Errorf("AccessKeyID = %q, want enriched ARN", activity[0].AccessKeyID)
-	}
-}
-
-func TestGetActivity_EnrichesWithAccountID(t *testing.T) {
-	s := newTestStore()
-
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "123456789012"
-
-	s.RecordRequest(Request{AccessKeyID: "AKID1"})
-
-	activity := s.GetActivity(1)
-	want := "arn:aws:iam::123456789012:access-key/AKID1"
-	if activity[0].AccessKeyID != want {
-		t.Errorf("AccessKeyID = %q, want %q", activity[0].AccessKeyID, want)
+	if activity[0].CallerARN != arn {
+		t.Errorf("CallerARN = %q, want %q", activity[0].CallerARN, arn)
 	}
 }
 
 func TestFlushRequests(t *testing.T) {
 	s := newTestStore()
 
-	s.RecordRequest(Request{AccessKeyID: "AKID1"})
-	s.RecordRequest(Request{AccessKeyID: "AKID2"})
+	s.RecordRequest(Request{CallerARN: "arn:aws:sts::111111111111:assumed-role/R/s"})
+	s.RecordRequest(Request{CallerARN: "arn:aws:sts::222222222222:assumed-role/R/s"})
 
 	flushed := s.FlushRequests()
 	if len(flushed) != 2 {
@@ -424,7 +361,7 @@ func TestConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < requestsPerGoroutine; i++ {
 				s.RecordRequest(Request{
-					AccessKeyID:  "AKID_concurrent",
+					CallerARN:    "arn:aws:sts::111111111111:assumed-role/Concurrent/s",
 					ModelID:      "model-a",
 					InputTokens:  1,
 					OutputTokens: 1,
@@ -473,7 +410,7 @@ func TestConcurrentEnsureCaller(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = s.EnsureCaller("SHARED_KEY")
+			results[idx] = s.EnsureCaller("arn:aws:sts::111111111111:assumed-role/Shared/s")
 		}(i)
 	}
 
@@ -494,9 +431,9 @@ func TestConcurrentReadWrite(t *testing.T) {
 	// Pre-populate some data.
 	for i := 0; i < 10; i++ {
 		s.RecordRequest(Request{
-			AccessKeyID: "AKID_PRE",
-			CostUSD:     0.01,
-			CreatedAt:   now,
+			CallerARN: "arn:aws:sts::111111111111:assumed-role/Pre/s",
+			CostUSD:   0.01,
+			CreatedAt: now,
 		})
 	}
 
@@ -510,9 +447,9 @@ func TestConcurrentReadWrite(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 50; j++ {
 				s.RecordRequest(Request{
-					AccessKeyID: "AKID_W",
-					CostUSD:     0.001,
-					CreatedAt:   now,
+					CallerARN: "arn:aws:sts::111111111111:assumed-role/W/s",
+					CostUSD:   0.001,
+					CreatedAt: now,
 				})
 			}
 		}()
@@ -532,44 +469,6 @@ func TestConcurrentReadWrite(t *testing.T) {
 	}
 
 	wg.Wait()
-}
-
-func TestUpdateCallerAccount(t *testing.T) {
-	s := newTestStore()
-
-	s.EnsureCaller("AKID1")
-	s.UpdateCallerAccount("AKID1", "123456789012")
-
-	acct := s.GetCallerAccountID("AKID1")
-	if acct != "123456789012" {
-		t.Errorf("GetCallerAccountID = %q, want %q", acct, "123456789012")
-	}
-
-	// Should not overwrite an existing account ID.
-	s.UpdateCallerAccount("AKID1", "999999999999")
-	acct = s.GetCallerAccountID("AKID1")
-	if acct != "123456789012" {
-		t.Errorf("account ID should not be overwritten, got %q", acct)
-	}
-}
-
-func TestFindARNByAccount(t *testing.T) {
-	s := newTestStore()
-
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "111111111111"
-	c.RoleARN = "arn:aws:sts::111111111111:assumed-role/MyRole/session"
-
-	arn := s.FindARNByAccount("111111111111")
-	if arn != "arn:aws:sts::111111111111:assumed-role/MyRole/session" {
-		t.Errorf("FindARNByAccount = %q, want the stored ARN", arn)
-	}
-
-	// Non-existent account returns empty.
-	arn = s.FindARNByAccount("999999999999")
-	if arn != "" {
-		t.Errorf("FindARNByAccount for unknown account = %q, want empty", arn)
-	}
 }
 
 func TestUpdateModels(t *testing.T) {
@@ -606,5 +505,67 @@ func TestUpdateModels_Empty(t *testing.T) {
 	got := s.GetModels()
 	if len(got) != 0 {
 		t.Errorf("expected 0 models after nil update, got %d", len(got))
+	}
+}
+
+func TestExtractAccountFromARN(t *testing.T) {
+	tests := []struct {
+		name string
+		arn  string
+		want string
+	}{
+		{
+			name: "valid STS ARN",
+			arn:  "arn:aws:sts::123456789012:assumed-role/MyRole/session",
+			want: "123456789012",
+		},
+		{
+			name: "valid IAM ARN",
+			arn:  "arn:aws:iam::987654321098:role/AdminRole",
+			want: "987654321098",
+		},
+		{
+			name: "short invalid ARN",
+			arn:  "arn:aws:sts",
+			want: "",
+		},
+		{
+			name: "empty string",
+			arn:  "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractAccountFromARN(tt.arn)
+			if got != tt.want {
+				t.Errorf("extractAccountFromARN(%q) = %q, want %q", tt.arn, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCallerMatchesLocked(t *testing.T) {
+	s := newTestStore()
+
+	// Test wildcard match
+	if !s.callerMatchesLocked("arn:aws:sts::123:assumed-role/R/s", "*", "*") {
+		t.Error("wildcard should match everything")
+	}
+
+	// Test account match
+	if !s.callerMatchesLocked("arn:aws:sts::123:assumed-role/R/s", "123", "") {
+		t.Error("account match should work")
+	}
+
+	// Test ARN match
+	if !s.callerMatchesLocked("arn:aws:sts::123:assumed-role/R/s", "", "arn:aws:sts::123:assumed-role/R/s") {
+		t.Error("exact ARN match should work")
+	}
+
+	// Test non-matching
+	if s.callerMatchesLocked("arn:aws:sts::123:assumed-role/R/s", "999", "") {
+		t.Error("non-matching account should not match")
 	}
 }

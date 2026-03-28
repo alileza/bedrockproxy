@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"bedrockproxy/internal/api"
-	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/config"
 	"bedrockproxy/internal/pricing"
 	"bedrockproxy/internal/proxy"
@@ -63,19 +62,14 @@ func run(configPath string) error {
 	// Auto-discover model pricing from AWS (non-blocking on failure).
 	go discoverPricing(ctx, cfg, s, tracker)
 
-	resolver, err := auth.NewResolver(ctx, cfg.AWS.Region, s)
-	if err != nil {
-		return fmt.Errorf("create resolver: %w", err)
-	}
-
 	quotaEngine := quota.NewEngine(s, cfg.Quotas)
 
-	p, err := proxy.New(ctx, cfg.AWS.Region, tracker, resolver, proxy.WithQuotaEngine(quotaEngine))
+	p, err := proxy.New(ctx, cfg.AWS.Region, tracker, proxy.WithQuotaEngine(quotaEngine))
 	if err != nil {
 		return fmt.Errorf("create proxy: %w", err)
 	}
 
-	router := api.NewRouter(s, p, resolver, events, api.WithQuotaEngine(quotaEngine))
+	router := api.NewRouter(s, p, events, api.WithQuotaEngine(quotaEngine))
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

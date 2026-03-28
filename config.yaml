@@ -29,3 +29,8 @@ quotas:
     requests_per_minute: 60
     mode: "warn"
     enabled: true
+  - id: "alireza-test"
+    match: "arn:aws:sts::*:assumed-role/AWSReservedSSO_AdminAccess_f15692697e76aa98/*"
+    cost_per_day: 0.000001
+    mode: "warn"
+    enabled: true

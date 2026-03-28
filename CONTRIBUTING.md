@@ -61,7 +61,7 @@ make build          # go generate + go build → bin/bedrockproxy
 
 ## Frontend
 
-The frontend uses the Trade Republic design system. Tokens are in `web/src/index.css`. Supports dark mode.
+Design tokens are in `web/src/index.css`. Supports dark mode.
 
 Key rules:
 - Use the existing color/spacing/radius tokens — don't introduce new ones

@@ -1,10 +1,8 @@
 package store
 
 import (
-	"encoding/json"
-	"log/slog"
-	"os"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,34 +10,24 @@ import (
 	"bedrockproxy/internal/config"
 )
 
-const callerCacheFile = ".bedrockproxy-callers.json"
-
-// callerEntry is the on-disk format for caller cache.
-type callerEntry struct {
-	AccountID string `json:"account_id"`
-	RoleARN   string `json:"role_arn"`
-}
-
 // Request represents a single proxied Bedrock call.
 type Request struct {
-	ID           int64   `json:"id"`
-	AccessKeyID  string  `json:"access_key_id"`
-	ModelID      string  `json:"model_id"`
-	Operation    string  `json:"operation"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	CostUSD      float64 `json:"cost_usd"`
-	LatencyMs    int     `json:"latency_ms"`
-	StatusCode   int     `json:"status_code"`
-	ErrorMessage string  `json:"error_message,omitempty"`
+	ID           int64     `json:"id"`
+	CallerARN    string    `json:"caller_arn"`
+	ModelID      string    `json:"model_id"`
+	Operation    string    `json:"operation"`
+	InputTokens  int       `json:"input_tokens"`
+	OutputTokens int       `json:"output_tokens"`
+	CostUSD      float64   `json:"cost_usd"`
+	LatencyMs    int       `json:"latency_ms"`
+	StatusCode   int       `json:"status_code"`
+	ErrorMessage string    `json:"error_message,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// Caller represents a resolved IAM identity.
+// Caller represents a caller identity.
 type Caller struct {
-	AccessKeyID string
-	AccountID   string
-	RoleARN     string
+	ARN         string
 	FirstSeenAt time.Time
 	LastSeenAt  time.Time
 }
@@ -77,13 +65,12 @@ type Model struct {
 type Store struct {
 	mu       sync.RWMutex
 	requests []Request
-	callers  map[string]*Caller
+	callers  map[string]*Caller // keyed by caller ARN
 	models   []Model
 	nextID   atomic.Int64
 }
 
 // New creates a new in-memory store initialized with the given model configs.
-// Loads cached caller identities from disk if available.
 func New(models []config.ModelConfig) *Store {
 	s := &Store{
 		callers: make(map[string]*Caller),
@@ -101,61 +88,7 @@ func New(models []config.ModelConfig) *Store {
 		})
 	}
 
-	s.loadCallerCache()
 	return s
-}
-
-func (s *Store) loadCallerCache() {
-	data, err := os.ReadFile(callerCacheFile)
-	if err != nil {
-		return
-	}
-	var cache map[string]callerEntry
-	if err := json.Unmarshal(data, &cache); err != nil {
-		return
-	}
-	now := time.Now().UTC()
-	for accountID, entry := range cache {
-		// Store a synthetic caller keyed by account ID
-		// When a real access key comes in from this account, FindARNByAccount will match it
-		syntheticKey := "_account_" + accountID
-		s.callers[syntheticKey] = &Caller{
-			AccessKeyID: syntheticKey,
-			AccountID:   entry.AccountID,
-			RoleARN:     entry.RoleARN,
-			FirstSeenAt: now,
-			LastSeenAt:  now,
-		}
-	}
-	slog.Info("loaded caller cache", "entries", len(cache))
-}
-
-func (s *Store) saveCallerCache() {
-	s.mu.RLock()
-	cache := make(map[string]callerEntry)
-	for _, c := range s.callers {
-		if c.AccountID != "" && c.RoleARN != "" {
-			// Key by account ID so it survives key rotation
-			cache[c.AccountID] = callerEntry{
-				AccountID: c.AccountID,
-				RoleARN:   c.RoleARN,
-			}
-		}
-	}
-	s.mu.RUnlock()
-
-	if len(cache) == 0 {
-		return
-	}
-
-	data, err := json.MarshalIndent(cache, "", "  ")
-	if err != nil {
-		slog.Warn("failed to marshal caller cache", "error", err)
-		return
-	}
-	if err := os.WriteFile(callerCacheFile, data, 0644); err != nil {
-		slog.Warn("failed to save caller cache", "error", err)
-	}
 }
 
 // RecordRequest appends a request and updates the caller's last_seen.
@@ -170,92 +103,36 @@ func (s *Store) RecordRequest(req Request) {
 
 	s.requests = append(s.requests, req)
 
-	c := s.ensureCallerLocked(req.AccessKeyID)
+	c := s.ensureCallerLocked(req.CallerARN)
 	c.LastSeenAt = req.CreatedAt
 }
 
 // EnsureCaller returns an existing caller or creates a new one.
-func (s *Store) EnsureCaller(accessKeyID string) *Caller {
+func (s *Store) EnsureCaller(arn string) *Caller {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.ensureCallerLocked(accessKeyID)
+	return s.ensureCallerLocked(arn)
 }
 
-func (s *Store) ensureCallerLocked(accessKeyID string) *Caller {
-	if c, ok := s.callers[accessKeyID]; ok {
+func (s *Store) ensureCallerLocked(arn string) *Caller {
+	if c, ok := s.callers[arn]; ok {
 		return c
 	}
 	now := time.Now().UTC()
 	c := &Caller{
-		AccessKeyID: accessKeyID,
+		ARN:         arn,
 		FirstSeenAt: now,
 		LastSeenAt:  now,
 	}
-	s.callers[accessKeyID] = c
+	s.callers[arn] = c
 	return c
 }
 
-// UpdateCallerARN sets the role ARN for a caller and propagates to all callers in the same account.
-func (s *Store) UpdateCallerARN(accessKeyID, roleARN string) {
-	s.mu.Lock()
-	c := s.ensureCallerLocked(accessKeyID)
-	c.RoleARN = roleARN
-
-	// Propagate to siblings in the same account
-	if c.AccountID != "" {
-		for _, other := range s.callers {
-			if other.AccountID == c.AccountID && other.RoleARN == "" {
-				other.RoleARN = roleARN
-			}
-		}
-	}
-	s.mu.Unlock()
-
-	s.saveCallerCache()
-}
-
-// UpdateCallerAccount sets the account ID for a caller.
-func (s *Store) UpdateCallerAccount(accessKeyID, accountID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	c := s.ensureCallerLocked(accessKeyID)
-	if c.AccountID == "" {
-		c.AccountID = accountID
-	}
-}
-
-// GetCallerRoleARN returns the role ARN for a caller, or empty string if not found.
-func (s *Store) GetCallerRoleARN(accessKeyID string) string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if c, ok := s.callers[accessKeyID]; ok {
-		return c.RoleARN
-	}
-	return ""
-}
-
-// GetCallerAccountID returns the account ID for a caller, or empty string if not found.
-func (s *Store) GetCallerAccountID(accessKeyID string) string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if c, ok := s.callers[accessKeyID]; ok {
-		return c.AccountID
-	}
-	return ""
-}
-
-// FindARNByAccount looks for a role ARN from any caller in the given account.
-func (s *Store) FindARNByAccount(accountID string) string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	for _, c := range s.callers {
-		if c.AccountID == accountID && c.RoleARN != "" {
-			return c.RoleARN
-		}
+// extractAccountFromARN pulls the account ID from an ARN like arn:aws:sts::123456789012:...
+func extractAccountFromARN(arn string) string {
+	parts := strings.Split(arn, ":")
+	if len(parts) >= 5 {
+		return parts[4]
 	}
 	return ""
 }
@@ -277,7 +154,7 @@ func (s *Store) GetSummary(since time.Time) Summary {
 		summary.TotalInputTokens += int64(r.InputTokens)
 		summary.TotalOutputTokens += int64(r.OutputTokens)
 		summary.TotalCostUSD += r.CostUSD
-		callerSet[r.AccessKeyID] = struct{}{}
+		callerSet[r.CallerARN] = struct{}{}
 	}
 	summary.UniqueCallers = len(callerSet)
 	return summary
@@ -288,11 +165,7 @@ func (s *Store) GetCallers(since time.Time) []CallerStats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	type callerKey struct {
-		accountID string
-		role      string
-	}
-	agg := make(map[callerKey]*CallerStats)
+	agg := make(map[string]*CallerStats)
 
 	for i := range s.requests {
 		r := &s.requests[i]
@@ -300,23 +173,16 @@ func (s *Store) GetCallers(since time.Time) []CallerStats {
 			continue
 		}
 
-		c := s.callers[r.AccessKeyID]
-		accountID := "unknown"
-		role := r.AccessKeyID
-		if c != nil {
-			if c.AccountID != "" {
-				accountID = c.AccountID
-			}
-			if c.RoleARN != "" {
-				role = c.RoleARN
-			}
+		arn := r.CallerARN
+		accountID := extractAccountFromARN(arn)
+		if accountID == "" {
+			accountID = "unknown"
 		}
 
-		key := callerKey{accountID: accountID, role: role}
-		cs, ok := agg[key]
+		cs, ok := agg[arn]
 		if !ok {
-			cs = &CallerStats{AccountID: accountID, Role: role}
-			agg[key] = cs
+			cs = &CallerStats{AccountID: accountID, Role: arn}
+			agg[arn] = cs
 		}
 		cs.TotalRequests++
 		cs.TotalInputTokens += int64(r.InputTokens)
@@ -350,18 +216,7 @@ func (s *Store) GetActivity(limit int) []Request {
 
 	result := make([]Request, limit)
 	for i := 0; i < limit; i++ {
-		req := s.requests[n-1-i]
-
-		// Enrich with caller info for the "caller" display field
-		if c, ok := s.callers[req.AccessKeyID]; ok {
-			if c.RoleARN != "" {
-				req.AccessKeyID = c.RoleARN
-			} else if c.AccountID != "" {
-				req.AccessKeyID = "arn:aws:iam::" + c.AccountID + ":access-key/" + req.AccessKeyID
-			}
-		}
-
-		result[i] = req
+		result[i] = s.requests[n-1-i]
 	}
 	return result
 }
@@ -386,8 +241,8 @@ func (s *Store) GetModels() []Model {
 
 // GetCallerUsageToday returns token and cost usage since midnight UTC, plus
 // request count from the last 60 seconds, for callers matching the given
-// accountID or role ARN. Pass "*" for both to aggregate all callers.
-func (s *Store) GetCallerUsageToday(accountID, role string) (tokens int64, cost float64, requestsLastMinute int) {
+// accountID or caller ARN. Pass "*" for both to aggregate all callers.
+func (s *Store) GetCallerUsageToday(accountID, callerARN string) (tokens int64, cost float64, requestsLastMinute int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -401,7 +256,7 @@ func (s *Store) GetCallerUsageToday(accountID, role string) (tokens int64, cost 
 			continue
 		}
 
-		if !s.callerMatchesLocked(r.AccessKeyID, accountID, role) {
+		if !s.callerMatchesLocked(r.CallerARN, accountID, callerARN) {
 			continue
 		}
 
@@ -415,22 +270,20 @@ func (s *Store) GetCallerUsageToday(accountID, role string) (tokens int64, cost 
 	return
 }
 
-// callerMatchesLocked checks whether the request's access key belongs to
-// a caller matching the given accountID or role ARN. Must hold s.mu.
-func (s *Store) callerMatchesLocked(accessKeyID, accountID, role string) bool {
-	if accountID == "*" && role == "*" {
+// callerMatchesLocked checks whether the request's caller ARN matches the
+// given accountID or callerARN pattern. Must hold s.mu.
+func (s *Store) callerMatchesLocked(reqCallerARN, accountID, callerARN string) bool {
+	if accountID == "*" && callerARN == "*" {
 		return true
 	}
 
-	c, ok := s.callers[accessKeyID]
-	if !ok {
-		return false
+	if accountID != "" && accountID != "*" {
+		reqAccountID := extractAccountFromARN(reqCallerARN)
+		if reqAccountID == accountID {
+			return true
+		}
 	}
-
-	if accountID != "" && accountID != "*" && c.AccountID == accountID {
-		return true
-	}
-	if role != "" && role != "*" && c.RoleARN == role {
+	if callerARN != "" && callerARN != "*" && reqCallerARN == callerARN {
 		return true
 	}
 	return false

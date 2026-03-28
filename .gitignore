@@ -4,6 +4,5 @@ web/node_modules/
 web/dist/
 .env
 *.exe
-.bedrockproxy-callers.json
 .bedrockproxy-quotas.json
 coverage.out

@@ -11,8 +11,6 @@ import (
 )
 
 func newTestStore() *store.Store {
-	// Create store without calling store.New to avoid file I/O.
-	// We build it the same way store_test.go does.
 	return store.New(nil)
 }
 
@@ -133,7 +131,7 @@ func TestRecord_CreatesCallerAndRequest(t *testing.T) {
 
 	// record is synchronous (unlike Record which spawns a goroutine).
 	tracker.record(Request{
-		AccessKeyID:  "AKID_TRACKER",
+		CallerARN:    "arn:aws:sts::111111111111:assumed-role/R/s",
 		ModelID:      "anthropic.claude-3-sonnet",
 		Operation:    "Converse",
 		InputTokens:  1000,
@@ -170,9 +168,9 @@ func TestRecord_NotifyCalled(t *testing.T) {
 	}
 
 	tracker.record(Request{
-		AccessKeyID: "AKID1",
-		ModelID:     "anthropic.claude-3-sonnet",
-		StatusCode:  200,
+		CallerARN: "arn:aws:sts::111111111111:assumed-role/R/s",
+		ModelID:   "anthropic.claude-3-sonnet",
+		StatusCode: 200,
 	})
 
 	mu.Lock()
@@ -187,9 +185,9 @@ func TestRecord_NoNotifyWhenNil(t *testing.T) {
 	tracker := NewTracker(s, testModels())
 	// Notify is nil by default; this should not panic.
 	tracker.record(Request{
-		AccessKeyID: "AKID1",
-		ModelID:     "anthropic.claude-3-sonnet",
-		StatusCode:  200,
+		CallerARN:  "arn:aws:sts::111111111111:assumed-role/R/s",
+		ModelID:    "anthropic.claude-3-sonnet",
+		StatusCode: 200,
 	})
 }
 

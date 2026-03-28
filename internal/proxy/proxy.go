@@ -19,7 +19,6 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 
-	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/metrics"
 	"bedrockproxy/internal/quota"
 	"bedrockproxy/internal/usage"
@@ -31,13 +30,12 @@ type Proxy struct {
 	signer   *v4.Signer
 	creds    aws.CredentialsProvider
 	tracker  *usage.Tracker
-	resolver *auth.Resolver
 	quotaEng *quota.Engine
 	region   string
 	client   *http.Client
 }
 
-func New(ctx context.Context, region string, tracker *usage.Tracker, resolver *auth.Resolver, opts ...Option) (*Proxy, error) {
+func New(ctx context.Context, region string, tracker *usage.Tracker, opts ...Option) (*Proxy, error) {
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
@@ -46,12 +44,11 @@ func New(ctx context.Context, region string, tracker *usage.Tracker, resolver *a
 	target, _ := url.Parse(fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", region))
 
 	p := &Proxy{
-		target:   target,
-		signer:   v4.NewSigner(),
-		creds:    cfg.Credentials,
-		tracker:  tracker,
-		resolver: resolver,
-		region:   region,
+		target:  target,
+		signer:  v4.NewSigner(),
+		creds:   cfg.Credentials,
+		tracker: tracker,
+		region:  region,
 		client: &http.Client{
 			Timeout: 5 * time.Minute,
 		},
@@ -72,18 +69,28 @@ func WithQuotaEngine(e *quota.Engine) Option {
 	}
 }
 
+// extractAccountFromARN pulls the account ID from an ARN like arn:aws:sts::123456789012:...
+func extractAccountFromARN(arn string) string {
+	parts := strings.Split(arn, ":")
+	if len(parts) >= 5 {
+		return parts[4]
+	}
+	return ""
+}
+
 // HandleProxy is the main handler that transparently proxies all Bedrock Runtime operations.
 func (p *Proxy) HandleProxy(w http.ResponseWriter, r *http.Request) {
-	caller, err := auth.ParseSigV4(r)
-	if err != nil {
-		slog.Warn("failed to parse SigV4", "error", err)
-		http.Error(w, `{"message":"unauthorized"}`, http.StatusUnauthorized)
+	callerARN := r.URL.Query().Get("caller")
+	if callerARN == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"message":"missing 'caller' query parameter. Set endpoint_url to http://host:port?caller=YOUR_ARN"}`))
 		return
 	}
 
-	p.resolveCaller(r, caller)
+	callerAccountID := extractAccountFromARN(callerARN)
 
-	if blocked := p.checkQuota(w, caller.AccessKeyID); blocked {
+	if blocked := p.checkQuota(w, callerARN, callerAccountID); blocked {
 		return
 	}
 
@@ -101,9 +108,12 @@ func (p *Proxy) HandleProxy(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Build the outbound request to Bedrock.
+	// Strip the "caller" query param before forwarding.
 	bedrockURL := *p.target
 	bedrockURL.Path = r.URL.Path
-	bedrockURL.RawQuery = r.URL.RawQuery
+	q := r.URL.Query()
+	q.Del("caller")
+	bedrockURL.RawQuery = q.Encode()
 
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, bedrockURL.String(), bytes.NewReader(body))
 	if err != nil {
@@ -143,7 +153,7 @@ func (p *Proxy) HandleProxy(w http.ResponseWriter, r *http.Request) {
 		modelID, operation := parsePathInfo(r.URL.Path)
 		slog.Error("bedrock request failed", "error", err, "path", r.URL.Path)
 		p.tracker.Record(r.Context(), usage.Request{
-			AccessKeyID:  caller.AccessKeyID,
+			CallerARN:    callerARN,
 			ModelID:      modelID,
 			Operation:    operation,
 			LatencyMs:    int(latency.Milliseconds()),
@@ -170,16 +180,16 @@ func (p *Proxy) HandleProxy(w http.ResponseWriter, r *http.Request) {
 
 	if isStreaming {
 		// Stream the response directly to the client.
-		p.streamResponse(w, resp, r.Context(), caller.AccessKeyID, modelID, operation, start, resp.StatusCode)
+		p.streamResponse(w, resp, r.Context(), callerARN, modelID, operation, start, resp.StatusCode)
 	} else {
 		// Non-streaming: read full body, extract usage, and write.
-		p.forwardResponse(w, resp, r.Context(), caller.AccessKeyID, modelID, operation, latency)
+		p.forwardResponse(w, resp, r.Context(), callerARN, modelID, operation, latency)
 	}
 }
 
 // streamResponse pipes the Bedrock response directly to the client for streaming responses.
 // It attempts to extract token counts from response headers.
-func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, ctx context.Context, accessKeyID, modelID, operation string, startTime time.Time, statusCode int) {
+func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, ctx context.Context, callerARN, modelID, operation string, startTime time.Time, statusCode int) {
 	// Stream the body to the client.
 	flusher, canFlush := w.(http.Flusher)
 	buf := make([]byte, 32*1024)
@@ -201,7 +211,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, ctx c
 	outputTokens := headerInt(resp.Header, "X-Amzn-Bedrock-Output-Token-Count")
 
 	p.tracker.Record(ctx, usage.Request{
-		AccessKeyID:  accessKeyID,
+		CallerARN:    callerARN,
 		ModelID:      modelID,
 		Operation:    operation,
 		InputTokens:  inputTokens,
@@ -212,7 +222,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, ctx c
 }
 
 // forwardResponse handles non-streaming responses: reads the full body, extracts usage, writes to client.
-func (p *Proxy) forwardResponse(w http.ResponseWriter, resp *http.Response, ctx context.Context, accessKeyID, modelID, operation string, latency time.Duration) {
+func (p *Proxy) forwardResponse(w http.ResponseWriter, resp *http.Response, ctx context.Context, callerARN, modelID, operation string, latency time.Duration) {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		slog.Error("failed to read bedrock response body", "error", err)
@@ -231,7 +241,7 @@ func (p *Proxy) forwardResponse(w http.ResponseWriter, resp *http.Response, ctx 
 	}
 
 	p.tracker.Record(ctx, usage.Request{
-		AccessKeyID:  accessKeyID,
+		CallerARN:    callerARN,
 		ModelID:      modelID,
 		Operation:    operation,
 		InputTokens:  inputTokens,
@@ -271,16 +281,9 @@ func extractTokenCounts(body []byte) (inputTokens, outputTokens int) {
 
 // checkQuota evaluates the caller against the quota engine.
 // Returns true if the request was blocked (response already written).
-func (p *Proxy) checkQuota(w http.ResponseWriter, accessKeyID string) bool {
+func (p *Proxy) checkQuota(w http.ResponseWriter, callerARN, callerAccountID string) bool {
 	if p.quotaEng == nil {
 		return false
-	}
-
-	callerARN := ""
-	callerAccountID := ""
-	if p.resolver != nil {
-		callerARN = p.resolver.GetRoleARN(accessKeyID)
-		callerAccountID = p.resolver.GetAccountID(accessKeyID)
 	}
 
 	result := p.quotaEng.Check(callerARN, callerAccountID)
@@ -290,9 +293,6 @@ func (p *Proxy) checkQuota(w http.ResponseWriter, accessKeyID string) bool {
 
 	mode := p.quotaEng.GetMode(result.QuotaID)
 	callerLabel := callerARN
-	if callerLabel == "" {
-		callerLabel = accessKeyID
-	}
 
 	metrics.QuotaExceededTotal.WithLabelValues(result.QuotaID, string(mode), callerLabel).Inc()
 
@@ -314,26 +314,13 @@ func (p *Proxy) checkQuota(w http.ResponseWriter, accessKeyID string) bool {
 	return false
 }
 
-// resolveCaller triggers identity resolution for the caller.
-func (p *Proxy) resolveCaller(r *http.Request, caller *auth.CallerIdentity) {
-	if p.resolver == nil {
-		return
-	}
-
-	if arn := r.Header.Get("X-Bedrock-Caller-ARN"); arn != "" {
-		p.resolver.UpdateRoleARN(r.Context(), caller.AccessKeyID, arn)
-		return
-	}
-
-	p.resolver.Resolve(r.Context(), caller.AccessKeyID)
-}
-
 // parsePathInfo extracts model ID and operation from a Bedrock path.
 // Example paths:
-//   /model/anthropic.claude-3-sonnet/converse
-//   /model/anthropic.claude-3-sonnet/converse-stream
-//   /model/anthropic.claude-3-sonnet/invoke
-//   /model/anthropic.claude-3-sonnet/invoke-with-response-stream
+//
+//	/model/anthropic.claude-3-sonnet/converse
+//	/model/anthropic.claude-3-sonnet/converse-stream
+//	/model/anthropic.claude-3-sonnet/invoke
+//	/model/anthropic.claude-3-sonnet/invoke-with-response-stream
 func parsePathInfo(path string) (modelID, operation string) {
 	// Remove leading slash.
 	path = strings.TrimPrefix(path, "/")

@@ -12,13 +12,13 @@ import (
 	"bedrockproxy/internal/store"
 )
 
-// newTestRouter creates a Router with a real store and nil proxy/resolver.
-// The proxy and resolver are nil so we cannot test proxy endpoints, but all
+// newTestRouter creates a Router with a real store and nil proxy.
+// The proxy is nil so we cannot test proxy endpoints, but all
 // /api/* dashboard endpoints work fine.
 func newTestRouter(models ...config.ModelConfig) (*Router, *store.Store) {
 	s := store.New(models)
 	events := NewEventBus()
-	r := NewRouter(s, nil, nil, events)
+	r := NewRouter(s, nil, events)
 	return r, s
 }
 
@@ -52,7 +52,7 @@ func TestUsageSummaryEndpoint(t *testing.T) {
 	router, s := newTestRouter()
 
 	s.RecordRequest(store.Request{
-		AccessKeyID:  "AKID1",
+		CallerARN:    "arn:aws:sts::111111111111:assumed-role/R/s",
 		InputTokens:  100,
 		OutputTokens: 50,
 		CostUSD:      0.01,
@@ -97,9 +97,9 @@ func TestCallersEndpoint(t *testing.T) {
 	router, s := newTestRouter()
 
 	s.RecordRequest(store.Request{
-		AccessKeyID: "AKID1",
-		CostUSD:     0.05,
-		CreatedAt:   time.Now().UTC(),
+		CallerARN: "arn:aws:sts::111111111111:assumed-role/R/s",
+		CostUSD:   0.05,
+		CreatedAt: time.Now().UTC(),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/usage/callers?minutes=60", nil)
@@ -143,7 +143,7 @@ func TestActivityEndpoint(t *testing.T) {
 	router, s := newTestRouter()
 
 	s.RecordRequest(store.Request{
-		AccessKeyID:  "AKID1",
+		CallerARN:    "arn:aws:sts::111111111111:assumed-role/R/s",
 		ModelID:      "model-a",
 		Operation:    "Converse",
 		InputTokens:  100,
@@ -239,94 +239,6 @@ func TestModelsEndpoint_EmptyReturnsArray(t *testing.T) {
 	body := strings.TrimSpace(w.Body.String())
 	if body != "[]" {
 		t.Errorf("expected empty array '[]', got %q", body)
-	}
-}
-
-func TestRegisterCallerEndpoint_ValidBody(t *testing.T) {
-	router, _ := newTestRouter()
-
-	bodyStr := `{"arn":"arn:aws:sts::123456789012:assumed-role/MyRole/session","account_id":"123456789012"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/register-caller", strings.NewReader(bodyStr))
-	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260327/eu-central-1/bedrock/aws4_request, SignedHeaders=host, Signature=abc")
-	req.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	var body map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decoding response: %v", err)
-	}
-	if body["status"] != "registered" {
-		t.Errorf("status = %q, want %q", body["status"], "registered")
-	}
-	if body["access_key_id"] != "AKIAIOSFODNN7EXAMPLE" {
-		t.Errorf("access_key_id = %q, want %q", body["access_key_id"], "AKIAIOSFODNN7EXAMPLE")
-	}
-	if body["arn"] != "arn:aws:sts::123456789012:assumed-role/MyRole/session" {
-		t.Errorf("arn = %q, want the requested ARN", body["arn"])
-	}
-}
-
-func TestRegisterCallerEndpoint_MissingSigV4(t *testing.T) {
-	router, _ := newTestRouter()
-
-	bodyStr := `{"arn":"arn:aws:sts::123456789012:assumed-role/MyRole/session"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/register-caller", strings.NewReader(bodyStr))
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
-	}
-}
-
-func TestRegisterCallerEndpoint_MissingARN(t *testing.T) {
-	router, _ := newTestRouter()
-
-	bodyStr := `{"account_id":"123456789012"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/register-caller", strings.NewReader(bodyStr))
-	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260327/eu-central-1/bedrock/aws4_request, SignedHeaders=host, Signature=abc")
-	req.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
-	}
-}
-
-func TestRegisterCallerEndpoint_EmptyBody(t *testing.T) {
-	router, _ := newTestRouter()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/register-caller", strings.NewReader(""))
-	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260327/eu-central-1/bedrock/aws4_request, SignedHeaders=host, Signature=abc")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
-	}
-}
-
-func TestRegisterCallerEndpoint_InvalidJSON(t *testing.T) {
-	router, _ := newTestRouter()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/register-caller", strings.NewReader("{invalid"))
-	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260327/eu-central-1/bedrock/aws4_request, SignedHeaders=host, Signature=abc")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
 

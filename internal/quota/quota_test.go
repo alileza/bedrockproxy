@@ -15,8 +15,9 @@ func newTestStore() *store.Store {
 
 func newTestEngine(s *store.Store) *Engine {
 	return &Engine{
-		quotas: make(map[string]Quota),
-		store:  s,
+		quotas:   make(map[string]Quota),
+		store:    s,
+		skipDisk: true,
 	}
 }
 
@@ -62,14 +63,11 @@ func TestCheck_UnderLimit(t *testing.T) {
 	s := newTestStore()
 	e := newTestEngine(s)
 
-	// Set up a caller
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "123"
-	c.RoleARN = "arn:aws:sts::123:assumed-role/Role/s"
+	callerARN := "arn:aws:sts::123:assumed-role/Role/s"
 
 	// Record some usage
 	s.RecordRequest(store.Request{
-		AccessKeyID:  "AKID1",
+		CallerARN:    callerARN,
 		InputTokens:  100,
 		OutputTokens: 50,
 		CostUSD:      0.01,
@@ -85,7 +83,7 @@ func TestCheck_UnderLimit(t *testing.T) {
 		Enabled:      true,
 	})
 
-	result := e.Check("arn:aws:sts::123:assumed-role/Role/s", "123")
+	result := e.Check(callerARN, "123")
 	if !result.Allowed {
 		t.Errorf("expected allowed, got blocked: %s", result.Reason)
 	}
@@ -95,12 +93,10 @@ func TestCheck_TokensExceeded(t *testing.T) {
 	s := newTestStore()
 	e := newTestEngine(s)
 
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "123"
-	c.RoleARN = "arn:aws:sts::123:assumed-role/Role/s"
+	callerARN := "arn:aws:sts::123:assumed-role/Role/s"
 
 	s.RecordRequest(store.Request{
-		AccessKeyID:  "AKID1",
+		CallerARN:    callerARN,
 		InputTokens:  5000,
 		OutputTokens: 5001,
 		CostUSD:      0.01,
@@ -115,7 +111,7 @@ func TestCheck_TokensExceeded(t *testing.T) {
 		Enabled:      true,
 	})
 
-	result := e.Check("arn:aws:sts::123:assumed-role/Role/s", "123")
+	result := e.Check(callerARN, "123")
 	if result.Allowed {
 		t.Error("expected blocked for token limit exceeded")
 	}
@@ -128,14 +124,12 @@ func TestCheck_CostExceeded(t *testing.T) {
 	s := newTestStore()
 	e := newTestEngine(s)
 
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "123"
-	c.RoleARN = "arn:aws:sts::123:assumed-role/Role/s"
+	callerARN := "arn:aws:sts::123:assumed-role/Role/s"
 
 	s.RecordRequest(store.Request{
-		AccessKeyID: "AKID1",
-		CostUSD:     51.0,
-		CreatedAt:   time.Now().UTC(),
+		CallerARN: callerARN,
+		CostUSD:   51.0,
+		CreatedAt: time.Now().UTC(),
 	})
 
 	e.SetQuota(Quota{
@@ -146,7 +140,7 @@ func TestCheck_CostExceeded(t *testing.T) {
 		Enabled:    true,
 	})
 
-	result := e.Check("arn:aws:sts::123:assumed-role/Role/s", "123")
+	result := e.Check(callerARN, "123")
 	if result.Allowed {
 		t.Error("expected blocked for cost limit exceeded")
 	}
@@ -159,15 +153,13 @@ func TestCheck_RequestsPerMinuteExceeded(t *testing.T) {
 	s := newTestStore()
 	e := newTestEngine(s)
 
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "123"
-	c.RoleARN = "arn:aws:sts::123:assumed-role/Role/s"
+	callerARN := "arn:aws:sts::123:assumed-role/Role/s"
 
 	now := time.Now().UTC()
 	for i := 0; i < 5; i++ {
 		s.RecordRequest(store.Request{
-			AccessKeyID: "AKID1",
-			CreatedAt:   now.Add(-time.Duration(i) * time.Second),
+			CallerARN: callerARN,
+			CreatedAt: now.Add(-time.Duration(i) * time.Second),
 		})
 	}
 
@@ -179,7 +171,7 @@ func TestCheck_RequestsPerMinuteExceeded(t *testing.T) {
 		Enabled:           true,
 	})
 
-	result := e.Check("arn:aws:sts::123:assumed-role/Role/s", "123")
+	result := e.Check(callerARN, "123")
 	if result.Allowed {
 		t.Error("expected blocked for requests per minute exceeded")
 	}
@@ -192,14 +184,12 @@ func TestCheck_WarnModeAllows(t *testing.T) {
 	s := newTestStore()
 	e := newTestEngine(s)
 
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "123"
-	c.RoleARN = "arn:aws:sts::123:assumed-role/Role/s"
+	callerARN := "arn:aws:sts::123:assumed-role/Role/s"
 
 	s.RecordRequest(store.Request{
-		AccessKeyID: "AKID1",
-		CostUSD:     51.0,
-		CreatedAt:   time.Now().UTC(),
+		CallerARN: callerARN,
+		CostUSD:   51.0,
+		CreatedAt: time.Now().UTC(),
 	})
 
 	e.SetQuota(Quota{
@@ -211,7 +201,7 @@ func TestCheck_WarnModeAllows(t *testing.T) {
 	})
 
 	// Check still returns not-allowed, but the proxy handler uses GetMode to decide behavior.
-	result := e.Check("arn:aws:sts::123:assumed-role/Role/s", "123")
+	result := e.Check(callerARN, "123")
 	if result.Allowed {
 		t.Error("check should still report exceeded even in warn mode")
 	}
@@ -226,14 +216,12 @@ func TestCheck_DisabledQuotaSkipped(t *testing.T) {
 	s := newTestStore()
 	e := newTestEngine(s)
 
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "123"
-	c.RoleARN = "arn:aws:sts::123:assumed-role/Role/s"
+	callerARN := "arn:aws:sts::123:assumed-role/Role/s"
 
 	s.RecordRequest(store.Request{
-		AccessKeyID: "AKID1",
-		CostUSD:     51.0,
-		CreatedAt:   time.Now().UTC(),
+		CallerARN: callerARN,
+		CostUSD:   51.0,
+		CreatedAt: time.Now().UTC(),
 	})
 
 	e.SetQuota(Quota{
@@ -244,7 +232,7 @@ func TestCheck_DisabledQuotaSkipped(t *testing.T) {
 		Enabled:    false, // disabled
 	})
 
-	result := e.Check("arn:aws:sts::123:assumed-role/Role/s", "123")
+	result := e.Check(callerARN, "123")
 	if !result.Allowed {
 		t.Error("disabled quota should not block requests")
 	}
@@ -264,14 +252,12 @@ func TestCheck_BestMatchWins(t *testing.T) {
 	s := newTestStore()
 	e := newTestEngine(s)
 
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "123"
-	c.RoleARN = "arn:aws:sts::123:assumed-role/Role/s"
+	callerARN := "arn:aws:sts::123:assumed-role/Role/s"
 
 	s.RecordRequest(store.Request{
-		AccessKeyID: "AKID1",
-		CostUSD:     51.0,
-		CreatedAt:   time.Now().UTC(),
+		CallerARN: callerARN,
+		CostUSD:   51.0,
+		CreatedAt: time.Now().UTC(),
 	})
 
 	// Wildcard quota with high limit (should not be used)
@@ -292,7 +278,7 @@ func TestCheck_BestMatchWins(t *testing.T) {
 		Enabled:    true,
 	}
 
-	result := e.Check("arn:aws:sts::123:assumed-role/Role/s", "123")
+	result := e.Check(callerARN, "123")
 	if result.Allowed {
 		t.Error("account-specific quota should have blocked this")
 	}
@@ -321,9 +307,6 @@ func TestSetQuota_And_DeleteQuota(t *testing.T) {
 	if quotas[0].ID != "q2" {
 		t.Errorf("remaining quota ID = %q, want 'q2'", quotas[0].ID)
 	}
-
-	// Clean up disk file
-	os.Remove(quotaFile)
 }
 
 func TestPersistence_SaveAndLoad(t *testing.T) {
@@ -332,7 +315,11 @@ func TestPersistence_SaveAndLoad(t *testing.T) {
 	defer os.Remove(quotaFile)
 
 	s := newTestStore()
-	e := newTestEngine(s)
+	// Use a non-test engine to test disk persistence
+	e := &Engine{
+		quotas: make(map[string]Quota),
+		store:  s,
+	}
 
 	e.SetQuota(Quota{
 		ID:           "q1",
@@ -378,12 +365,10 @@ func TestGetQuotasWithUsage(t *testing.T) {
 	s := newTestStore()
 	e := newTestEngine(s)
 
-	c := s.EnsureCaller("AKID1")
-	c.AccountID = "123"
-	c.RoleARN = "arn:aws:sts::123:assumed-role/Role/s"
+	callerARN := "arn:aws:sts::123:assumed-role/Role/s"
 
 	s.RecordRequest(store.Request{
-		AccessKeyID:  "AKID1",
+		CallerARN:    callerARN,
 		InputTokens:  200,
 		OutputTokens: 100,
 		CostUSD:      0.05,
