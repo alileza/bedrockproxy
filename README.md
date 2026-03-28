@@ -69,8 +69,8 @@ Open `http://localhost:5173` to see:
 
 - **In-memory store** for real-time dashboard (no database needed)
 - **S3 flush** for long-term storage (gzipped JSONL, hourly partitioned)
-- **Single binary** — Go backend with embedded React frontend
-- **19MB** compiled size
+- **Single binary** — Go backend with embedded React frontend (`go generate` + `go:embed`)
+- **~16MB** compiled size
 
 ## Configuration
 
@@ -108,9 +108,24 @@ make dev
 # Frontend (React + Vite, hot reload)
 make dev-frontend
 
-# Build single binary
+# Build single binary (generates frontend + embeds into Go binary)
 make build
 ./bin/bedrockproxy
+
+# Or step by step
+go generate .   # build frontend → dist/
+go build .      # embed dist/ → single binary
+```
+
+## Docker
+
+```bash
+# Run from ghcr.io
+docker run -p 8080:8080 -v $(pwd)/config.yaml:/config.yaml \
+  ghcr.io/alileza/bedrockproxy -config /config.yaml
+
+# Build locally (amd64 + arm64)
+docker build -t bedrockproxy .
 ```
 
 ## Caller identity
