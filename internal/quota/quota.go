@@ -208,6 +208,17 @@ func (e *Engine) GetMode(quotaID string) Mode {
 	return ""
 }
 
+// GetQuotaByID returns a pointer to the quota with the given ID, or nil.
+func (e *Engine) GetQuotaByID(id string) *Quota {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if q, ok := e.quotas[id]; ok {
+		return &q
+	}
+	return nil
+}
+
 func (e *Engine) loadFromDisk() {
 	data, err := os.ReadFile(quotaFile)
 	if err != nil {

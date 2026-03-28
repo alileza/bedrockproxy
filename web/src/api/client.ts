@@ -21,6 +21,11 @@ export interface Caller {
   total_input_tokens: number;
   total_output_tokens: number;
   total_cost_usd: number;
+  quota_id?: string;
+  quota_match?: string;
+  quota_mode?: string;
+  quota_exceeded: boolean;
+  quota_reason?: string;
 }
 
 export interface ActivityEntry {

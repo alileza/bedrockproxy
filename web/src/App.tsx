@@ -136,9 +136,31 @@ export function App() {
                   key: "role",
                   label: "Role",
                   render: (c) => (
-                    <span className="font-[580]" title={c.role}>
-                      {shortenArn(c.role)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-[580]" title={c.role}>
+                        {shortenArn(c.role)}
+                      </span>
+                      {c.quota_id && (
+                        <span className="group/quota relative">
+                          <span
+                            className={`inline-block rounded-[4px] px-1.5 py-0.5 text-[10px] font-[580] cursor-default ${
+                              c.quota_exceeded
+                                ? "bg-status-error/15 text-status-error"
+                                : "bg-grey-100 text-content-secondary"
+                            }`}
+                          >
+                            {c.quota_exceeded ? "EXCEEDED" : c.quota_mode}
+                          </span>
+                          <div className="absolute left-0 bottom-full mb-1.5 px-2.5 py-1.5 rounded-[8px] bg-grey-900 text-surface-primary text-xs whitespace-nowrap opacity-0 pointer-events-none group-hover/quota:opacity-100 transition-opacity z-50">
+                            <div className="font-[580]">Quota: {c.quota_id}</div>
+                            <div className="text-surface-primary/60 mt-0.5">Match: {c.quota_match}</div>
+                            {c.quota_exceeded && (
+                              <div className="text-status-error mt-0.5">{c.quota_reason}</div>
+                            )}
+                          </div>
+                        </span>
+                      )}
+                    </div>
                   ),
                 },
                 {

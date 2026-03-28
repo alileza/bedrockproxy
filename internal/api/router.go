@@ -101,10 +101,36 @@ func (r *Router) handleCallers(w http.ResponseWriter, req *http.Request) {
 	since := time.Now().UTC().Add(-time.Duration(minutes) * time.Minute)
 
 	callers := r.store.GetCallers(since)
-	if callers == nil {
-		callers = []store.CallerStats{}
+
+	type callerWithQuota struct {
+		store.CallerStats
+		QuotaID       string  `json:"quota_id,omitempty"`
+		QuotaMatch    string  `json:"quota_match,omitempty"`
+		QuotaMode     string  `json:"quota_mode,omitempty"`
+		QuotaExceeded bool    `json:"quota_exceeded"`
+		QuotaReason   string  `json:"quota_reason,omitempty"`
 	}
-	writeJSON(w, callers)
+
+	result := make([]callerWithQuota, 0, len(callers))
+	for _, c := range callers {
+		cq := callerWithQuota{CallerStats: c}
+		if r.quotaEng != nil {
+			check := r.quotaEng.Check(c.Role, c.AccountID)
+			if check.QuotaID != "" {
+				cq.QuotaID = check.QuotaID
+				if q := r.quotaEng.GetQuotaByID(check.QuotaID); q != nil {
+					cq.QuotaMatch = q.Match
+					cq.QuotaMode = string(q.Mode)
+				}
+			}
+			if !check.Allowed {
+				cq.QuotaExceeded = true
+				cq.QuotaReason = check.Reason
+			}
+		}
+		result = append(result, cq)
+	}
+	writeJSON(w, result)
 }
 
 func (r *Router) handleActivity(w http.ResponseWriter, req *http.Request) {
