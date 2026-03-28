@@ -192,3 +192,47 @@ func TestRecord_NoNotifyWhenNil(t *testing.T) {
 		StatusCode:  200,
 	})
 }
+
+func TestUpdatePrices_AddsNewModels(t *testing.T) {
+	s := newTestStore()
+	tracker := NewTracker(s, testModels())
+
+	// New model not in initial config.
+	tracker.UpdatePrices([]config.ModelConfig{
+		{
+			ID:                    "meta.llama-3",
+			Name:                  "Llama 3",
+			InputPricePerMillion:  1.0,
+			OutputPricePerMillion: 2.0,
+		},
+	})
+
+	cost := tracker.calculateCost("meta.llama-3", 1_000_000, 1_000_000)
+	// input: 1M * 1.0 / 1M = 1.0, output: 1M * 2.0 / 1M = 2.0, total = 3.0
+	want := 3.0
+	if math.Abs(cost-want) > 1e-9 {
+		t.Errorf("cost = %f, want %f", cost, want)
+	}
+}
+
+func TestUpdatePrices_DoesNotOverwriteExisting(t *testing.T) {
+	s := newTestStore()
+	tracker := NewTracker(s, testModels())
+
+	// Try to overwrite an existing model's pricing.
+	tracker.UpdatePrices([]config.ModelConfig{
+		{
+			ID:                    "anthropic.claude-3-sonnet",
+			Name:                  "Claude 3 Sonnet Overridden",
+			InputPricePerMillion:  999.0,
+			OutputPricePerMillion: 999.0,
+		},
+	})
+
+	cost := tracker.calculateCost("anthropic.claude-3-sonnet", 1_000_000, 1_000_000)
+	// Should still use original pricing: 3.0 + 15.0 = 18.0
+	want := 18.0
+	if math.Abs(cost-want) > 1e-9 {
+		t.Errorf("cost = %f, want %f (existing should not be overwritten)", cost, want)
+	}
+}

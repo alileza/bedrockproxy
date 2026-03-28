@@ -366,6 +366,14 @@ func (s *Store) GetActivity(limit int) []Request {
 	return result
 }
 
+// UpdateModels replaces the model list. Config-provided models should already
+// be merged by the caller; this is used to inject auto-discovered pricing.
+func (s *Store) UpdateModels(models []Model) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.models = models
+}
+
 // GetModels returns the configured models.
 func (s *Store) GetModels() []Model {
 	s.mu.RLock()

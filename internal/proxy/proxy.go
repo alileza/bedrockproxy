@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"bedrockproxy/internal/auth"
+	"bedrockproxy/internal/metrics"
 	"bedrockproxy/internal/usage"
 )
 
@@ -126,6 +127,9 @@ func (p *Proxy) HandleConverse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	metrics.ActiveRequests.Inc()
+	defer metrics.ActiveRequests.Dec()
+
 	start := time.Now()
 	input := req.toSDK(modelID)
 
@@ -190,6 +194,9 @@ func (p *Proxy) HandleInvokeModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
+
+	metrics.ActiveRequests.Inc()
+	defer metrics.ActiveRequests.Dec()
 
 	start := time.Now()
 

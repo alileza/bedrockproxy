@@ -15,6 +15,7 @@ import (
 	"bedrockproxy/internal/api"
 	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/config"
+	"bedrockproxy/internal/pricing"
 	"bedrockproxy/internal/proxy"
 	"bedrockproxy/internal/store"
 	"bedrockproxy/internal/usage"
@@ -58,6 +59,9 @@ func run(configPath string) error {
 	tracker := usage.NewTracker(s, cfg.Models)
 	tracker.Notify = events.NotifyFunc()
 
+	// Auto-discover model pricing from AWS (non-blocking on failure).
+	go discoverPricing(ctx, cfg, s, tracker)
+
 	resolver, err := auth.NewResolver(ctx, cfg.AWS.Region, s)
 	if err != nil {
 		return fmt.Errorf("create resolver: %w", err)
@@ -92,4 +96,68 @@ func run(configPath string) error {
 	}
 
 	return nil
+}
+
+// discoverPricing fetches model pricing from AWS and merges it with config.
+// Config-specified models always take precedence over auto-discovered ones.
+func discoverPricing(ctx context.Context, cfg *config.Config, s *store.Store, tracker *usage.Tracker) {
+	discovered := pricing.Fetch(ctx, cfg.AWS.Region)
+	if len(discovered) == 0 {
+		slog.Info("pricing unavailable, cost tracking uses config only")
+		return
+	}
+
+	// Build a set of config model IDs for precedence check.
+	configIDs := make(map[string]struct{}, len(cfg.Models))
+	for _, m := range cfg.Models {
+		configIDs[m.ID] = struct{}{}
+	}
+
+	// Convert discovered pricing to config.ModelConfig and store.Model slices.
+	var newTrackerModels []config.ModelConfig
+	var allStoreModels []store.Model
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Start with config models (they take precedence).
+	for _, m := range cfg.Models {
+		allStoreModels = append(allStoreModels, store.Model{
+			ID:                    m.ID,
+			Name:                  m.Name,
+			InputPricePerMillion:  m.InputPricePerMillion,
+			OutputPricePerMillion: m.OutputPricePerMillion,
+			Enabled:               m.Enabled,
+			CreatedAt:             now,
+		})
+	}
+
+	// Add discovered models that are not in config.
+	for id, mp := range discovered {
+		if _, inConfig := configIDs[id]; inConfig {
+			continue
+		}
+		newTrackerModels = append(newTrackerModels, config.ModelConfig{
+			ID:                    id,
+			Name:                  mp.Name,
+			InputPricePerMillion:  mp.InputPricePerMillion,
+			OutputPricePerMillion: mp.OutputPricePerMillion,
+			Enabled:               true,
+		})
+		allStoreModels = append(allStoreModels, store.Model{
+			ID:                    id,
+			Name:                  mp.Name,
+			InputPricePerMillion:  mp.InputPricePerMillion,
+			OutputPricePerMillion: mp.OutputPricePerMillion,
+			Enabled:               true,
+			CreatedAt:             now,
+		})
+	}
+
+	s.UpdateModels(allStoreModels)
+	tracker.UpdatePrices(newTrackerModels)
+
+	slog.Info("fetched pricing for models",
+		"discovered", len(discovered),
+		"from_config", len(cfg.Models),
+		"total", len(allStoreModels),
+	)
 }

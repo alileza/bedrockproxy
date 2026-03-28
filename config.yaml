@@ -10,14 +10,16 @@ s3:
   prefix: "bedrockproxy"
   flush_interval: "5m"
 
-models:
-  - id: "anthropic.claude-sonnet-4-6"
-    name: "Claude Sonnet 4.6"
-    input_price_per_million: 3.0
-    output_price_per_million: 15.0
-    enabled: true
-  - id: "anthropic.claude-haiku-4-5-20251001-v1:0"
-    name: "Claude Haiku 4.5"
-    input_price_per_million: 0.8
-    output_price_per_million: 4.0
-    enabled: true
+# Models are auto-discovered from AWS Bedrock and Pricing APIs.
+# To override pricing or add models manually, uncomment below:
+# models:
+#   - id: "anthropic.claude-sonnet-4-6"
+#     name: "Claude Sonnet 4.6"
+#     input_price_per_million: 3.0
+#     output_price_per_million: 15.0
+#     enabled: true
+#   - id: "anthropic.claude-haiku-4-5-20251001-v1:0"
+#     name: "Claude Haiku 4.5"
+#     input_price_per_million: 0.8
+#     output_price_per_million: 4.0
+#     enabled: true

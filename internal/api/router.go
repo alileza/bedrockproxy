@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/proxy"
 	"bedrockproxy/internal/store"
@@ -43,6 +45,9 @@ func (r *Router) routes() {
 	// Bedrock proxy endpoints (clients call these)
 	r.mux.HandleFunc("POST /model/{modelId}/converse", r.proxy.HandleConverse)
 	r.mux.HandleFunc("POST /model/{modelId}/invoke", r.proxy.HandleInvokeModel)
+
+	// Prometheus metrics
+	r.mux.Handle("GET /metrics", promhttp.Handler())
 
 	// Caller self-registration — caller hits this to register their ARN
 	r.mux.HandleFunc("POST /api/register-caller", r.handleRegisterCaller)

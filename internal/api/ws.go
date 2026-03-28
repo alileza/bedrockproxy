@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"bedrockproxy/internal/metrics"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -64,6 +66,7 @@ func (eb *EventBus) HandleWS(w http.ResponseWriter, r *http.Request) {
 	eb.mu.Lock()
 	eb.clients[conn] = struct{}{}
 	eb.mu.Unlock()
+	metrics.WebSocketClients.Inc()
 
 	// Set up ping/pong for connection health
 	conn.SetPongHandler(func(string) error {
@@ -92,5 +95,6 @@ func (eb *EventBus) HandleWS(w http.ResponseWriter, r *http.Request) {
 	eb.mu.Lock()
 	delete(eb.clients, conn)
 	eb.mu.Unlock()
+	metrics.WebSocketClients.Dec()
 	conn.Close()
 }

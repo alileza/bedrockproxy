@@ -571,3 +571,40 @@ func TestFindARNByAccount(t *testing.T) {
 		t.Errorf("FindARNByAccount for unknown account = %q, want empty", arn)
 	}
 }
+
+func TestUpdateModels(t *testing.T) {
+	s := newTestStore(config.ModelConfig{ID: "m1", Name: "Model 1"})
+
+	// Verify initial state.
+	if got := s.GetModels(); len(got) != 1 {
+		t.Fatalf("expected 1 model initially, got %d", len(got))
+	}
+
+	// Update with new models.
+	s.UpdateModels([]Model{
+		{ID: "m1", Name: "Model 1 Updated"},
+		{ID: "m2", Name: "Model 2"},
+	})
+
+	got := s.GetModels()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 models after update, got %d", len(got))
+	}
+	if got[0].Name != "Model 1 Updated" {
+		t.Errorf("models[0].Name = %q, want %q", got[0].Name, "Model 1 Updated")
+	}
+	if got[1].ID != "m2" {
+		t.Errorf("models[1].ID = %q, want %q", got[1].ID, "m2")
+	}
+}
+
+func TestUpdateModels_Empty(t *testing.T) {
+	s := newTestStore(config.ModelConfig{ID: "m1", Name: "Model 1"})
+
+	s.UpdateModels(nil)
+
+	got := s.GetModels()
+	if len(got) != 0 {
+		t.Errorf("expected 0 models after nil update, got %d", len(got))
+	}
+}

@@ -2,10 +2,12 @@ package usage
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
 	"bedrockproxy/internal/config"
+	"bedrockproxy/internal/metrics"
 	"bedrockproxy/internal/store"
 )
 
@@ -37,6 +39,18 @@ func NewTracker(s *store.Store, models []config.ModelConfig) *Tracker {
 	return &Tracker{store: s, prices: prices}
 }
 
+// UpdatePrices merges new model pricing into the tracker. Existing entries
+// are not overwritten (config takes precedence).
+func (t *Tracker) UpdatePrices(models []config.ModelConfig) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, m := range models {
+		if _, exists := t.prices[m.ID]; !exists {
+			t.prices[m.ID] = m
+		}
+	}
+}
+
 func (t *Tracker) Record(_ context.Context, req Request) {
 	go t.record(req)
 }
@@ -55,6 +69,16 @@ func (t *Tracker) record(req Request) {
 		StatusCode:   req.StatusCode,
 		ErrorMessage: req.ErrorMessage,
 	})
+
+	// Prometheus metrics
+	status := fmt.Sprintf("%d", req.StatusCode)
+	metrics.RequestsTotal.WithLabelValues(req.ModelID, req.Operation, status).Inc()
+	metrics.RequestDuration.WithLabelValues(req.ModelID, req.Operation).Observe(float64(req.LatencyMs) / 1000)
+	metrics.InputTokensTotal.WithLabelValues(req.ModelID, req.AccessKeyID).Add(float64(req.InputTokens))
+	metrics.OutputTokensTotal.WithLabelValues(req.ModelID, req.AccessKeyID).Add(float64(req.OutputTokens))
+	if costUSD > 0 {
+		metrics.CostTotal.WithLabelValues(req.ModelID, req.AccessKeyID).Add(costUSD)
+	}
 
 	if t.Notify != nil {
 		t.Notify()
