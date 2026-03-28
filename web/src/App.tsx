@@ -9,15 +9,17 @@ export function App() {
   useWS();
 
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen bg-surface-primary">
       <Sidebar />
-      <main className="flex-1 pl-20 pr-10 py-8 max-w-[1440px]">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/activity" element={<Activity />} />
-          <Route path="/models" element={<Models />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+      <main className="max-w-[1440px] mx-auto" style={{ padding: "0 40px 0 80px" }}>
+        <div className="py-8">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/activity" element={<Activity />} />
+            <Route path="/models" element={<Models />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
       </main>
     </div>
   );
