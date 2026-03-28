@@ -8,6 +8,8 @@ A thin proxy in front of AWS Bedrock that tracks who's using what, how much it c
 
 **Solution**: Point your AWS SDK at bedrockproxy instead of Bedrock. Same auth, same API. The proxy forwards everything to Bedrock and tracks usage per caller.
 
+![Dashboard](docs/dashboard.png)
+
 ## How it works
 
 ```
