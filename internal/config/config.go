@@ -2,15 +2,16 @@ package config
 
 import (
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Server   ServerConfig  `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	AWS      AWSConfig     `yaml:"aws"`
-	Models   []ModelConfig `yaml:"models"`
+	Server ServerConfig `yaml:"server"`
+	AWS    AWSConfig    `yaml:"aws"`
+	S3     S3Config     `yaml:"s3"`
+	Models []ModelConfig `yaml:"models"`
 }
 
 type ServerConfig struct {
@@ -18,12 +19,14 @@ type ServerConfig struct {
 	BaseURL string `yaml:"base_url"`
 }
 
-type DatabaseConfig struct {
-	URL string `yaml:"url"`
-}
-
 type AWSConfig struct {
 	Region string `yaml:"region"`
+}
+
+type S3Config struct {
+	Bucket        string        `yaml:"bucket"`
+	Prefix        string        `yaml:"prefix"`
+	FlushInterval time.Duration `yaml:"flush_interval"`
 }
 
 type ModelConfig struct {
@@ -52,6 +55,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.AWS.Region == "" {
 		cfg.AWS.Region = "eu-central-1"
+	}
+	if cfg.S3.Prefix == "" {
+		cfg.S3.Prefix = "bedrockproxy"
+	}
+	if cfg.S3.FlushInterval == 0 {
+		cfg.S3.FlushInterval = 5 * time.Minute
 	}
 
 	return &cfg, nil

@@ -2,11 +2,13 @@ server:
   port: 8080
   base_url: "http://localhost:5173"
 
-database:
-  url: "postgres://bedrockproxy:bedrockproxy@localhost:5432/bedrockproxy?sslmode=disable"
-
 aws:
   region: "eu-central-1"
+
+s3:
+  bucket: ""  # leave empty to disable S3 flushing
+  prefix: "bedrockproxy"
+  flush_interval: "5m"
 
 models:
   - id: "anthropic.claude-sonnet-4-6"

@@ -1,4 +1,4 @@
-.PHONY: build build-frontend dev dev-frontend test clean docker-up docker-down
+.PHONY: build build-frontend dev dev-frontend test clean
 
 build: build-frontend
 	go build -o bin/bedrockproxy .
@@ -17,9 +17,3 @@ test:
 
 clean:
 	rm -rf bin/ web/dist/
-
-docker-up:
-	docker compose up -d
-
-docker-down:
-	docker compose down

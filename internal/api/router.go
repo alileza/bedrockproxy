@@ -4,23 +4,23 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-
-	"github.com/jackc/pgx/v5/pgxpool"
+	"time"
 
 	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/proxy"
+	"bedrockproxy/internal/store"
 )
 
 type Router struct {
-	pool     *pgxpool.Pool
+	store    *store.Store
 	proxy    *proxy.Proxy
 	resolver *auth.Resolver
 	mux      *http.ServeMux
 	events   *EventBus
 }
 
-func NewRouter(pool *pgxpool.Pool, proxy *proxy.Proxy, resolver *auth.Resolver, events *EventBus) *Router {
-	r := &Router{pool: pool, proxy: proxy, resolver: resolver, mux: http.NewServeMux(), events: events}
+func NewRouter(s *store.Store, proxy *proxy.Proxy, resolver *auth.Resolver, events *EventBus) *Router {
+	r := &Router{store: s, proxy: proxy, resolver: resolver, mux: http.NewServeMux(), events: events}
 	r.routes()
 	return r
 }
@@ -52,78 +52,19 @@ func (r *Router) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (r *Router) handleUsageSummary(w http.ResponseWriter, req *http.Request) {
 	minutes := queryInt(req, "minutes", 43200) // default 30 days
+	since := time.Now().UTC().Add(-time.Duration(minutes) * time.Minute)
 
-	rows, err := r.pool.Query(req.Context(), `
-		SELECT
-			COUNT(*)                          AS total_requests,
-			COALESCE(SUM(input_tokens), 0)    AS total_input_tokens,
-			COALESCE(SUM(output_tokens), 0)   AS total_output_tokens,
-			COALESCE(SUM(cost_usd), 0)        AS total_cost_usd,
-			COUNT(DISTINCT caller_id)          AS unique_callers
-		FROM requests
-		WHERE created_at >= NOW() - $1 * INTERVAL '1 minute'
-	`, minutes)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	var summary struct {
-		TotalRequests    int64   `json:"total_requests"`
-		TotalInputTokens int64   `json:"total_input_tokens"`
-		TotalOutputTokens int64  `json:"total_output_tokens"`
-		TotalCostUSD     float64 `json:"total_cost_usd"`
-		UniqueCallers    int     `json:"unique_callers"`
-	}
-
-	if rows.Next() {
-		rows.Scan(&summary.TotalRequests, &summary.TotalInputTokens, &summary.TotalOutputTokens, &summary.TotalCostUSD, &summary.UniqueCallers)
-	}
+	summary := r.store.GetSummary(since)
 	writeJSON(w, summary)
 }
 
 func (r *Router) handleCallers(w http.ResponseWriter, req *http.Request) {
 	minutes := queryInt(req, "minutes", 43200)
+	since := time.Now().UTC().Add(-time.Duration(minutes) * time.Minute)
 
-	rows, err := r.pool.Query(req.Context(), `
-		SELECT
-			COALESCE(c.account_id, 'unknown')  AS account_id,
-			COALESCE(c.role_arn, c.access_key_id) AS role,
-			COUNT(*)              AS total_requests,
-			SUM(r.input_tokens)   AS total_input_tokens,
-			SUM(r.output_tokens)  AS total_output_tokens,
-			SUM(r.cost_usd)       AS total_cost_usd
-		FROM requests r
-		JOIN callers c ON c.id = r.caller_id
-		WHERE r.created_at >= NOW() - $1 * INTERVAL '1 minute'
-		GROUP BY c.account_id, COALESCE(c.role_arn, c.access_key_id)
-		ORDER BY total_cost_usd DESC
-		LIMIT 100
-	`, minutes)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	type caller struct {
-		AccountID         string  `json:"account_id"`
-		Role              string  `json:"role"`
-		TotalRequests     int64   `json:"total_requests"`
-		TotalInputTokens  int64   `json:"total_input_tokens"`
-		TotalOutputTokens int64   `json:"total_output_tokens"`
-		TotalCostUSD      float64 `json:"total_cost_usd"`
-	}
-
-	var callers []caller
-	for rows.Next() {
-		var c caller
-		rows.Scan(&c.AccountID, &c.Role, &c.TotalRequests, &c.TotalInputTokens, &c.TotalOutputTokens, &c.TotalCostUSD)
-		callers = append(callers, c)
-	}
+	callers := r.store.GetCallers(since)
 	if callers == nil {
-		callers = []caller{}
+		callers = []store.CallerStats{}
 	}
 	writeJSON(w, callers)
 }
@@ -131,32 +72,7 @@ func (r *Router) handleCallers(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleActivity(w http.ResponseWriter, req *http.Request) {
 	limit := queryInt(req, "limit", 50)
 
-	rows, err := r.pool.Query(req.Context(), `
-		SELECT
-			r.id,
-			COALESCE(
-				c.role_arn,
-				CASE WHEN c.account_id IS NOT NULL THEN 'arn:aws:iam::' || c.account_id || ':access-key/' || c.access_key_id
-				ELSE c.access_key_id END
-			) AS caller,
-			r.model_id,
-			r.operation,
-			r.input_tokens,
-			r.output_tokens,
-			r.cost_usd,
-			r.latency_ms,
-			r.status_code,
-			r.created_at
-		FROM requests r
-		JOIN callers c ON c.id = r.caller_id
-		ORDER BY r.created_at DESC
-		LIMIT $1
-	`, limit)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
+	activities := r.store.GetActivity(limit)
 
 	type activity struct {
 		ID           int64   `json:"id"`
@@ -171,47 +87,28 @@ func (r *Router) handleActivity(w http.ResponseWriter, req *http.Request) {
 		CreatedAt    string  `json:"created_at"`
 	}
 
-	var activities []activity
-	for rows.Next() {
-		var a activity
-		rows.Scan(&a.ID, &a.Caller, &a.ModelID, &a.Operation, &a.InputTokens, &a.OutputTokens, &a.CostUSD, &a.LatencyMs, &a.StatusCode, &a.CreatedAt)
-		activities = append(activities, a)
+	result := make([]activity, 0, len(activities))
+	for _, a := range activities {
+		result = append(result, activity{
+			ID:           a.ID,
+			Caller:       a.AccessKeyID, // Already enriched by GetActivity
+			ModelID:      a.ModelID,
+			Operation:    a.Operation,
+			InputTokens:  a.InputTokens,
+			OutputTokens: a.OutputTokens,
+			CostUSD:      a.CostUSD,
+			LatencyMs:    a.LatencyMs,
+			StatusCode:   a.StatusCode,
+			CreatedAt:    a.CreatedAt.Format(time.RFC3339Nano),
+		})
 	}
-	if activities == nil {
-		activities = []activity{}
-	}
-	writeJSON(w, activities)
+	writeJSON(w, result)
 }
 
-func (r *Router) handleModels(w http.ResponseWriter, req *http.Request) {
-	rows, err := r.pool.Query(req.Context(), `
-		SELECT id, name, input_price_per_million, output_price_per_million, enabled, created_at
-		FROM models
-		ORDER BY name
-	`)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	type model struct {
-		ID                    string  `json:"id"`
-		Name                  string  `json:"name"`
-		InputPricePerMillion  float64 `json:"input_price_per_million"`
-		OutputPricePerMillion float64 `json:"output_price_per_million"`
-		Enabled               bool    `json:"enabled"`
-		CreatedAt             string  `json:"created_at"`
-	}
-
-	var models []model
-	for rows.Next() {
-		var m model
-		rows.Scan(&m.ID, &m.Name, &m.InputPricePerMillion, &m.OutputPricePerMillion, &m.Enabled, &m.CreatedAt)
-		models = append(models, m)
-	}
+func (r *Router) handleModels(w http.ResponseWriter, _ *http.Request) {
+	models := r.store.GetModels()
 	if models == nil {
-		models = []model{}
+		models = []store.Model{}
 	}
 	writeJSON(w, models)
 }

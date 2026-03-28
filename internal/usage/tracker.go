@@ -2,13 +2,11 @@ package usage
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"bedrockproxy/internal/config"
+	"bedrockproxy/internal/store"
 )
 
 // Request represents a single proxied Bedrock call.
@@ -23,56 +21,44 @@ type Request struct {
 	ErrorMessage string
 }
 
-// Tracker records usage to PostgreSQL.
+// Tracker records usage to the in-memory store.
 type Tracker struct {
-	pool   *pgxpool.Pool
+	store  *store.Store
 	prices map[string]config.ModelConfig
 	mu     sync.RWMutex
 	Notify func()
 }
 
-func NewTracker(pool *pgxpool.Pool, models []config.ModelConfig) *Tracker {
+func NewTracker(s *store.Store, models []config.ModelConfig) *Tracker {
 	prices := make(map[string]config.ModelConfig, len(models))
 	for _, m := range models {
 		prices[m.ID] = m
 	}
-	return &Tracker{pool: pool, prices: prices}
+	return &Tracker{store: s, prices: prices}
 }
 
 func (t *Tracker) Record(_ context.Context, req Request) {
-	go t.record(context.Background(), req)
+	go t.record(req)
 }
 
-func (t *Tracker) record(ctx context.Context, req Request) {
-	callerID, err := t.ensureCaller(ctx, req.AccessKeyID)
-	if err != nil {
-		slog.Error("ensure caller failed", "access_key_id", req.AccessKeyID, "error", err)
-		return
-	}
-
+func (t *Tracker) record(req Request) {
 	costUSD := t.calculateCost(req.ModelID, req.InputTokens, req.OutputTokens)
 
-	_, err = t.pool.Exec(ctx, `
-		INSERT INTO requests (caller_id, model_id, operation, input_tokens, output_tokens, cost_usd, latency_ms, status_code, error_message)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, callerID, req.ModelID, req.Operation, req.InputTokens, req.OutputTokens, costUSD, req.LatencyMs, req.StatusCode, nilIfEmpty(req.ErrorMessage))
-	if err != nil {
-		slog.Error("insert request failed", "error", err)
-		return
-	}
+	t.store.RecordRequest(store.Request{
+		AccessKeyID:  req.AccessKeyID,
+		ModelID:      req.ModelID,
+		Operation:    req.Operation,
+		InputTokens:  req.InputTokens,
+		OutputTokens: req.OutputTokens,
+		CostUSD:      costUSD,
+		LatencyMs:    req.LatencyMs,
+		StatusCode:   req.StatusCode,
+		ErrorMessage: req.ErrorMessage,
+	})
+
 	if t.Notify != nil {
 		t.Notify()
 	}
-}
-
-func (t *Tracker) ensureCaller(ctx context.Context, accessKeyID string) (int64, error) {
-	var id int64
-	err := t.pool.QueryRow(ctx, `
-		INSERT INTO callers (access_key_id) VALUES ($1)
-		ON CONFLICT (access_key_id) DO UPDATE SET last_seen_at = NOW()
-		RETURNING id
-	`, accessKeyID).Scan(&id)
-	return id, err
 }
 
 func (t *Tracker) calculateCost(modelID string, inputTokens, outputTokens int) float64 {
@@ -94,11 +80,4 @@ func (t *Tracker) calculateCost(modelID string, inputTokens, outputTokens int) f
 	inputCost := float64(inputTokens) * m.InputPricePerMillion / 1_000_000
 	outputCost := float64(outputTokens) * m.OutputPricePerMillion / 1_000_000
 	return inputCost + outputCost
-}
-
-func nilIfEmpty(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }

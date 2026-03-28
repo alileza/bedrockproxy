@@ -11,13 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"bedrockproxy/internal/api"
 	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/config"
-	"bedrockproxy/internal/database"
 	"bedrockproxy/internal/proxy"
+	"bedrockproxy/internal/store"
 	"bedrockproxy/internal/usage"
 )
 
@@ -42,26 +40,20 @@ func run(configPath string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	pool, err := database.Connect(ctx, cfg.Database.URL)
+	s := store.New(cfg.Models)
+
+	flusher, err := store.NewS3Flusher(ctx, s, cfg.S3.Bucket, cfg.S3.Prefix, cfg.S3.FlushInterval, cfg.AWS.Region)
 	if err != nil {
-		return fmt.Errorf("connect database: %w", err)
+		return fmt.Errorf("create s3 flusher: %w", err)
 	}
-	defer pool.Close()
-
-	if err := database.Migrate(ctx, pool); err != nil {
-		return fmt.Errorf("migrate database: %w", err)
-	}
-
-	if err := seedModels(ctx, pool, cfg.Models); err != nil {
-		return fmt.Errorf("seed models: %w", err)
-	}
+	flusher.Start(ctx)
 
 	events := api.NewEventBus()
 
-	tracker := usage.NewTracker(pool, cfg.Models)
+	tracker := usage.NewTracker(s, cfg.Models)
 	tracker.Notify = events.NotifyFunc()
 
-	resolver, err := auth.NewResolver(ctx, cfg.AWS.Region, pool)
+	resolver, err := auth.NewResolver(ctx, cfg.AWS.Region, s)
 	if err != nil {
 		return fmt.Errorf("create resolver: %w", err)
 	}
@@ -71,7 +63,7 @@ func run(configPath string) error {
 		return fmt.Errorf("create proxy: %w", err)
 	}
 
-	router := api.NewRouter(pool, p, resolver, events)
+	router := api.NewRouter(s, p, resolver, events)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
@@ -94,24 +86,5 @@ func run(configPath string) error {
 		return fmt.Errorf("server error: %w", err)
 	}
 
-	return nil
-}
-
-func seedModels(ctx context.Context, pool *pgxpool.Pool, models []config.ModelConfig) error {
-	for _, m := range models {
-		_, err := pool.Exec(ctx, `
-			INSERT INTO models (id, name, input_price_per_million, output_price_per_million, enabled)
-			VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (id) DO UPDATE SET
-				name = EXCLUDED.name,
-				input_price_per_million = EXCLUDED.input_price_per_million,
-				output_price_per_million = EXCLUDED.output_price_per_million,
-				enabled = EXCLUDED.enabled,
-				updated_at = NOW()
-		`, m.ID, m.Name, m.InputPricePerMillion, m.OutputPricePerMillion, m.Enabled)
-		if err != nil {
-			return fmt.Errorf("seed model %s: %w", m.ID, err)
-		}
-	}
 	return nil
 }
