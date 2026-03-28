@@ -14,7 +14,7 @@ export function TimeRangePicker({ value, onChange }: TimeRangePickerProps) {
           onClick={() => onChange(range)}
           className={`px-3 py-1.5 text-xs font-[580] transition-colors duration-150 ${
             value.minutes === range.minutes
-              ? "bg-content-primary text-white"
+              ? "bg-grey-900 text-surface-primary"
               : "bg-surface-primary text-content-secondary hover:bg-hover-primary"
           }`}
         >
