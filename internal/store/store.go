@@ -1,6 +1,9 @@
 package store
 
 import (
+	"encoding/json"
+	"log/slog"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -8,6 +11,14 @@ import (
 
 	"bedrockproxy/internal/config"
 )
+
+const callerCacheFile = ".bedrockproxy-callers.json"
+
+// callerEntry is the on-disk format for caller cache.
+type callerEntry struct {
+	AccountID string `json:"account_id"`
+	RoleARN   string `json:"role_arn"`
+}
 
 // Request represents a single proxied Bedrock call.
 type Request struct {
@@ -72,6 +83,7 @@ type Store struct {
 }
 
 // New creates a new in-memory store initialized with the given model configs.
+// Loads cached caller identities from disk if available.
 func New(models []config.ModelConfig) *Store {
 	s := &Store{
 		callers: make(map[string]*Caller),
@@ -89,7 +101,61 @@ func New(models []config.ModelConfig) *Store {
 		})
 	}
 
+	s.loadCallerCache()
 	return s
+}
+
+func (s *Store) loadCallerCache() {
+	data, err := os.ReadFile(callerCacheFile)
+	if err != nil {
+		return
+	}
+	var cache map[string]callerEntry
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	for accountID, entry := range cache {
+		// Store a synthetic caller keyed by account ID
+		// When a real access key comes in from this account, FindARNByAccount will match it
+		syntheticKey := "_account_" + accountID
+		s.callers[syntheticKey] = &Caller{
+			AccessKeyID: syntheticKey,
+			AccountID:   entry.AccountID,
+			RoleARN:     entry.RoleARN,
+			FirstSeenAt: now,
+			LastSeenAt:  now,
+		}
+	}
+	slog.Info("loaded caller cache", "entries", len(cache))
+}
+
+func (s *Store) saveCallerCache() {
+	s.mu.RLock()
+	cache := make(map[string]callerEntry)
+	for _, c := range s.callers {
+		if c.AccountID != "" && c.RoleARN != "" {
+			// Key by account ID so it survives key rotation
+			cache[c.AccountID] = callerEntry{
+				AccountID: c.AccountID,
+				RoleARN:   c.RoleARN,
+			}
+		}
+	}
+	s.mu.RUnlock()
+
+	if len(cache) == 0 {
+		return
+	}
+
+	data, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		slog.Warn("failed to marshal caller cache", "error", err)
+		return
+	}
+	if err := os.WriteFile(callerCacheFile, data, 0644); err != nil {
+		slog.Warn("failed to save caller cache", "error", err)
+	}
 }
 
 // RecordRequest appends a request and updates the caller's last_seen.
@@ -132,8 +198,6 @@ func (s *Store) ensureCallerLocked(accessKeyID string) *Caller {
 // UpdateCallerARN sets the role ARN for a caller and propagates to all callers in the same account.
 func (s *Store) UpdateCallerARN(accessKeyID, roleARN string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	c := s.ensureCallerLocked(accessKeyID)
 	c.RoleARN = roleARN
 
@@ -145,6 +209,9 @@ func (s *Store) UpdateCallerARN(accessKeyID, roleARN string) {
 			}
 		}
 	}
+	s.mu.Unlock()
+
+	s.saveCallerCache()
 }
 
 // UpdateCallerAccount sets the account ID for a caller.
