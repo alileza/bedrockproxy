@@ -49,3 +49,12 @@ body {
   background: #ffffff;
   color: var(--color-content-primary);
 }
+
+@keyframes highlight-fade {
+  0% { background-color: rgba(0, 87, 255, 0.12); }
+  100% { background-color: transparent; }
+}
+
+.animate-highlight {
+  animation: highlight-fade 1.5s ease-out;
+}

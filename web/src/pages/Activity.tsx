@@ -19,6 +19,7 @@ export function Activity() {
 
       <Table<ActivityEntry>
         keyFn={(a) => a.id}
+        versionFn={(a) => a.id}
         columns={[
           {
             key: "time",

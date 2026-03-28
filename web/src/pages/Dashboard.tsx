@@ -63,6 +63,7 @@ export function Dashboard() {
       </h2>
       <Table<Caller>
         keyFn={(c) => `${c.account_id}:${c.role}`}
+        versionFn={(c) => `${c.total_requests}:${c.total_cost_usd}`}
         columns={[
           {
             key: "account",
