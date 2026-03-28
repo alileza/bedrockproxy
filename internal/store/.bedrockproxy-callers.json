@@ -1,6 +1,0 @@
-{
-  "111111111111": {
-    "account_id": "111111111111",
-    "role_arn": "arn:aws:sts::111111111111:assumed-role/MyRole/session"
-  }
-}
