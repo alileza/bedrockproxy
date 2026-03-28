@@ -4,12 +4,22 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"bedrockproxy/internal/auth"
 	"bedrockproxy/internal/proxy"
 	"bedrockproxy/internal/store"
 )
+
+// extractAccountFromARN pulls the account ID from an ARN like arn:aws:sts::123456789012:...
+func extractAccountFromARN(arn string) string {
+	parts := strings.Split(arn, ":")
+	if len(parts) >= 5 {
+		return parts[4]
+	}
+	return ""
+}
 
 type Router struct {
 	store    *store.Store
@@ -130,6 +140,11 @@ func (r *Router) handleRegisterCaller(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	// Extract account ID from ARN: arn:aws:sts::123456789012:assumed-role/...
+	if accountID := extractAccountFromARN(body.ARN); accountID != "" {
+		r.store.EnsureCaller(caller.AccessKeyID)
+		r.store.UpdateCallerAccount(caller.AccessKeyID, accountID)
+	}
 	if r.resolver != nil {
 		r.resolver.UpdateRoleARN(req.Context(), caller.AccessKeyID, body.ARN)
 	}

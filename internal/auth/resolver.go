@@ -91,8 +91,6 @@ func (r *Resolver) resolve(ctx context.Context, accessKeyID string) {
 
 // UpdateRoleARN stores the full role ARN for a caller.
 // Also propagates to all other callers from the same account.
-func (r *Resolver) UpdateRoleARN(ctx context.Context, accessKeyID, roleARN string) {
-	go func() {
-		r.store.UpdateCallerARN(accessKeyID, roleARN)
-	}()
+func (r *Resolver) UpdateRoleARN(_ context.Context, accessKeyID, roleARN string) {
+	r.store.UpdateCallerARN(accessKeyID, roleARN)
 }
