@@ -23,8 +23,16 @@ export function Sidebar() {
       onMouseLeave={() => setExpanded(false)}
     >
       <div className="h-16 flex items-center px-4 border-b border-border-primary">
-        <div className="relative w-8 h-8 rounded-[8px] bg-content-primary flex items-center justify-center flex-shrink-0">
-          <span className="text-white text-sm font-[680]">B</span>
+        <div className="relative w-8 h-8 flex-shrink-0">
+          <svg viewBox="0 0 64 64" fill="none" className="w-8 h-8">
+            <path d="M32 4L56 18V46L32 60L8 46V18L32 4Z" stroke="#0057FF" strokeWidth="2.5"/>
+            <path d="M32 16L46 32L32 48L18 32L32 16Z" fill="#0057FF"/>
+            <line x1="32" y1="4" x2="32" y2="16" stroke="#0057FF" strokeWidth="2.5" strokeLinecap="round"/>
+            <line x1="32" y1="48" x2="32" y2="60" stroke="#0057FF" strokeWidth="2.5" strokeLinecap="round"/>
+            <line x1="8" y1="32" x2="18" y2="32" stroke="#0057FF" strokeWidth="2.5" strokeLinecap="round"/>
+            <line x1="46" y1="32" x2="56" y2="32" stroke="#0057FF" strokeWidth="2.5" strokeLinecap="round"/>
+            <circle cx="32" cy="32" r="4" fill="white"/>
+          </svg>
           <span
             className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface-primary transition-colors duration-300 ${
               sseConnected ? "bg-status-success" : "bg-status-error"
