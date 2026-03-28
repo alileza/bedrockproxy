@@ -37,9 +37,21 @@ func NewResolver(ctx context.Context, region string, s *store.Store) (*Resolver,
 // Resolve looks up the account for an access key and updates the store.
 // If the same account has a previously registered role_arn, it inherits it.
 func (r *Resolver) Resolve(ctx context.Context, accessKeyID string) {
+	// Skip if already fully resolved (has ARN)
+	if arn := r.store.GetCallerRoleARN(accessKeyID); arn != "" {
+		return
+	}
+
+	// Skip if STS lookup already done (account resolved, just no ARN yet)
 	r.mu.Lock()
 	if r.seen[accessKeyID] {
 		r.mu.Unlock()
+		// Still try to inherit ARN from siblings (may have been registered since last check)
+		if acct := r.store.GetCallerAccountID(accessKeyID); acct != "" {
+			if inherited := r.store.FindARNByAccount(acct); inherited != "" {
+				r.store.UpdateCallerARN(accessKeyID, inherited)
+			}
+		}
 		return
 	}
 	r.seen[accessKeyID] = true
