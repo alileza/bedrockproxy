@@ -66,8 +66,55 @@ models:
     enabled: true
 ```
 
-## Quota enforcement is per-process
+## Quota enforcement is per-process (HA with sticky sessions)
 
-Quotas are enforced in the proxy's memory. If you run multiple replicas, each replica tracks usage independently — a caller could exceed their quota by spreading requests across replicas.
+Quotas are enforced in the proxy's memory. If you run multiple replicas without sticky sessions, each replica tracks usage independently — a caller could exceed their quota by spreading requests across replicas.
 
-**Workaround**: Run a single replica. For multi-replica deployments, use Bedrock's native invocation logging + Snowflake for accurate aggregation, and treat the proxy's quotas as approximate.
+**Recommended**: Use sticky sessions with consistent hashing on the `caller` query parameter. This routes all requests from the same caller to the same replica, making quotas accurate per caller.
+
+```yaml
+# Ingress example (nginx)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_caller"
+```
+
+**Graceful rollout**: During deployments, the proxy drains in-flight requests (up to 150s for streaming) and flushes remaining data to S3 before exiting. Configure your deployment strategy accordingly:
+
+```yaml
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0      # never remove a pod before new one is ready
+      maxSurge: 1
+  template:
+    spec:
+      terminationGracePeriodSeconds: 180  # allow drain + S3 flush
+```
+
+This applies to both **deployments** and **node rotations** (spot reclaim, OS upgrades, cluster autoscaler). The flow:
+
+1. Pod gets SIGTERM (deploy, node drain, spot eviction)
+2. Readiness probe fails → ingress stops routing new requests
+3. Pod drains in-flight requests (up to 150s for streaming)
+4. Pod flushes remaining data to S3
+5. Pod exits
+
+To prevent all replicas being evicted at once during node rotation, add a PodDisruptionBudget:
+
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bedrockproxy
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: bedrockproxy
+```
+
+This ensures at least one pod is always running, even during node drains.

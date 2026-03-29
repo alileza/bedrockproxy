@@ -81,16 +81,27 @@ func run(configPath string) error {
 
 	go func() {
 		<-ctx.Done()
-		slog.Info("shutting down server")
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		slog.Info("shutting down: draining in-flight requests")
+
+		// Give in-flight requests time to complete (streaming can take 2+ min)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 150*time.Second)
 		defer shutdownCancel()
 		srv.Shutdown(shutdownCtx)
+
+		// Flush remaining data to S3 before exit
+		slog.Info("shutting down: flushing to S3")
+		flusher.FlushNow(context.Background())
+
+		slog.Info("shutdown complete")
 	}()
 
 	slog.Info("starting bedrockproxy", "port", cfg.Server.Port)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
 	}
+
+	// Wait a moment for the shutdown goroutine to flush
+	time.Sleep(2 * time.Second)
 
 	return nil
 }

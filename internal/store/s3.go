@@ -71,6 +71,14 @@ func (f *S3Flusher) Start(ctx context.Context) {
 	slog.Info("S3 flusher started", "bucket", f.bucket, "prefix", f.prefix, "interval", f.interval)
 }
 
+// FlushNow performs an immediate flush. Used during graceful shutdown.
+func (f *S3Flusher) FlushNow(ctx context.Context) {
+	if f.client == nil {
+		return
+	}
+	f.flush(ctx)
+}
+
 func (f *S3Flusher) flush(ctx context.Context) {
 	requests := f.store.FlushRequests()
 	if len(requests) == 0 {
