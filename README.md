@@ -96,3 +96,4 @@ Quota match patterns: `account:<id>`, `arn:aws:sts::*:assumed-role/MyRole*` (glo
 
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** — EKS deployment, IAM policy, Kubernetes manifests, Prometheus scraping
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Development setup, project structure, build commands, testing
+- **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** — Known limitations and workarounds
