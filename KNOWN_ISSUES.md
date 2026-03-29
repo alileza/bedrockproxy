@@ -28,6 +28,16 @@ export BEDROCK_ENDPOINT_URL="http://bedrockproxy:8080?caller=$(aws sts get-calle
 
 **Why not make it optional?** Without a caller identity, the proxy can't attribute usage or enforce quotas per caller. Rather than showing misleading data (raw access key IDs that rotate every hour), we require explicit identification.
 
+### Alternative: retroactive resolution via CloudTrail / Bedrock invocation logs
+
+It is technically possible to resolve the access key to a full ARN after the fact:
+
+- **CloudTrail** logs every Bedrock API call with both the temporary access key AND the full caller ARN. However, CloudTrail has a 5-15 minute delivery delay, and the proxy uses its own IRSA credentials to call Bedrock — so CloudTrail would show the **proxy's** ARN, not the original caller's.
+
+- **Bedrock invocation logs** (if enabled) capture `identity.arn` for each request. If the proxy passes a correlation ID via the Converse API's `requestMetadata` field, you could join proxy logs with invocation logs in Snowflake to backfill the caller ARN.
+
+Neither approach works in real-time, and both depend on external services being configured. The `?caller=` parameter is the simplest solution that works immediately, is self-service, and doesn't require any AWS logging infrastructure.
+
 ## In-memory store is lost on restart
 
 All request history is cleared when the proxy restarts. The dashboard shows "since last restart" only.
